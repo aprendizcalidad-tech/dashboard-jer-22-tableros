@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111b35">
+  <title>Centro de Control JER · 22 tableros</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <script defer src="https://www.gstatic.com/firebasejs/13.0.0/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/13.0.0/firebase-auth-compat.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+  <script defer type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark" aria-hidden="true">▥</div>
+    <div class="brand-copy"><strong>Centro de Control JER</strong><small>Gestión contractual · Boyacá y Amazonas</small></div>
+    <div class="top-actions" id="top-actions" hidden>
+      <span id="signed-user" class="user-email"></span>
+      <button id="refresh" type="button" class="button subtle">Actualizar</button>
+      <button id="pdf-current" type="button" class="button subtle">PDF de esta pestaña</button>
+      <button id="pdf-all" type="button" class="button primary">Informe PDF completo</button>
+      <button id="logout" type="button" class="button subtle">Salir</button>
+    </div>
+  </header>
+
+  <main class="page">
+    <section id="setup" class="notice" hidden><h1>Falta conectar el proyecto</h1><p>Completa Firebase y la URL de Apps Script en <code>js/config.js</code>. La guía detallada está en <code>README.md</code>.</p></section>
+    <section id="login-screen" class="auth-shell" hidden>
+      <div class="auth-intro"><span class="eyebrow">INFORME DE GESTIÓN</span><h1>Una vista clara de las obligaciones en cada región.</h1><p>22 tableros conectados a las fuentes de Boyacá y Amazonas. Entra con tu correo autorizado para consultar los datos.</p><div class="auth-art" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+      <div class="auth-card"><h2>Ingresar</h2><p>Tu correo debe estar verificado y autorizado por el administrador.</p>
+        <form id="login-form"><label>Correo electrónico<input id="login-email" type="email" autocomplete="username" required></label><label>Contraseña<input id="login-password" type="password" autocomplete="current-password" required></label><button class="button primary wide" type="submit">Iniciar sesión</button></form>
+        <button class="text-button" id="reset-password" type="button">Restablecer contraseña</button>
+        <details class="register"><summary>¿Aún no tienes cuenta? Crear cuenta</summary><form id="register-form"><label>Correo<input id="register-email" type="email" autocomplete="email" required></label><label>Contraseña nueva<input id="register-password" type="password" autocomplete="new-password" minlength="8" required></label><button class="button secondary wide" type="submit">Crear cuenta y enviar verificación</button></form></details>
+        <p id="auth-status" class="message" role="alert"></p>
+      </div>
+    </section>
+
+    <section id="workspace" hidden>
+      <div class="heading"><div><span class="eyebrow">PANEL CONTRACTUAL</span><h1>Informe de gestión</h1><p>Explora cada obligación y consulta sus datos por región y UAD.</p></div><span class="connection" id="connection">Conectando…</span></div>
+      <form id="global-filters" class="filter-bar">
+        <div class="filter-head"><strong>Filtros globales</strong><small>Se aplican a todos los tableros, salvo los que tengan ajuste individual.</small></div>
+        <label>Período<select id="period"><option value="ALL">Año completo</option><option value="Q1">Trimestre 1</option><option value="Q2">Trimestre 2</option><option value="Q3">Trimestre 3</option><option value="Q4">Trimestre 4</option><option value="H1">Semestre 1</option><option value="H2">Semestre 2</option><option value="CUSTOM">Elegir meses</option></select></label>
+        <label>Departamento<select id="region"><option value="both">Boyacá y Amazonas</option><option value="boy">Boyacá</option><option value="amz">Amazonas</option></select></label>
+        <label>UAD / zona<select id="zone"><option value="ALL">Todas las UAD</option></select></label>
+        <label>Obligación<select id="obligation"><option value="ALL">Todas las obligaciones</option></select></label>
+        <button type="submit" class="button primary apply">Aplicar filtros</button>
+        <fieldset id="month-picks" class="month-picks" aria-label="Meses elegidos"><legend>Meses incluidos</legend><div id="month-chips"></div></fieldset>
+      </form>
+
+      <div class="board-nav-wrap"><nav id="board-nav" class="board-nav" aria-label="22 tableros"></nav></div>
+      <div class="board-heading"><div><span id="board-index" class="eyebrow"></span><h2 id="board-title"></h2><p id="board-subtitle"></p></div><button id="individual-settings" class="button secondary" type="button">Ajuste de esta pestaña</button></div>
+      <p id="status" class="message status" role="status"></p>
+      <div id="dashboard"></div>
+    </section>
+  </main>
+
+  <dialog id="override-dialog" class="override-dialog"><form id="override-form" method="dialog">
+    <header><div><span class="eyebrow">CONFIGURACIÓN INDIVIDUAL</span><h2>Filtros de esta pestaña</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Cerrar">×</button></header>
+    <p>«Heredar» conserva el filtro global. Los cambios de esta pestaña se guardan en este navegador.</p>
+    <label>Meses<select id="override-period"><option value="INHERIT">Heredar meses globales</option><option value="ALL">Año completo</option><option value="Q1">Trimestre 1</option><option value="Q2">Trimestre 2</option><option value="Q3">Trimestre 3</option><option value="Q4">Trimestre 4</option><option value="H1">Semestre 1</option><option value="H2">Semestre 2</option><option value="CUSTOM">Elegir meses para esta pestaña</option></select></label>
+    <div id="override-months" class="override-months" hidden></div>
+    <label>Departamento<select id="override-region"><option value="INHERIT">Heredar departamento</option><option value="both">Boyacá y Amazonas</option><option value="boy">Boyacá</option><option value="amz">Amazonas</option></select></label>
+    <label>UAD / zona<select id="override-zone"><option value="INHERIT">Heredar UAD</option><option value="ALL">Todas las UAD</option></select></label>
+    <label>Obligación temática<select id="override-obligation"><option value="INHERIT">Heredar obligación</option><option value="ALL">Todas las obligaciones</option></select></label>
+    <div class="dialog-actions"><button id="clear-override" class="button subtle" type="button">Quitar ajuste individual</button><button class="button primary" type="submit">Guardar y consultar</button></div>
+  </form></dialog>
+</body>
+</html>

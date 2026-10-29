@@ -1,0 +1,8 @@
+{
+  "name": "dashboard-jer-22-tableros",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
+}
