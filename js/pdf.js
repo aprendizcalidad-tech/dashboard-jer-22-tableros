@@ -22,32 +22,45 @@ function pageHeader(doc,board,region,filters,continued=false) {
 function drawChart(doc,view,x,y,w,h) {
   const {labels,series}=chartData(view);
   const values=series.flatMap(s=>s.values).filter(v=>v!==null);
-  if(!values.length){color(doc,'#738098','text');doc.setFontSize(10);doc.text('Todavía no hay valores para graficar.',x+14,y+35);return;}
-  const maxBars=Math.max(4,Math.floor((w-47)/(series.length*38)));
+  if(!values.length){color(doc,'#738098','text');doc.setFontSize(10);doc.text('Todavía no hay valores para graficar.',x+14,y+35);return h;}
+  // Menos grupos por página dan un espacio propio y legible a cada valor.
+  const maxBars=Math.max(2,Math.floor((w-47)/(series.length*58)));
   const shown=Math.min(labels.length,14,maxBars),min=Math.min(0,...values),max=Math.max(1,...values),span=max-min||1;
-  const plotTop=y+22,plotBottom=y+h-42,plotH=plotBottom-plotTop;
+  const group=(w-47)/shown,slot=group/series.length;
+  const entries=[];let maxLines=1;
+  doc.setFont('helvetica','bold');doc.setFontSize(8);
+  for(let i=0;i<shown;i++)for(let j=0;j<series.length;j++){
+    if(series[j].values[i]===null)continue;
+    const raw=view.rows[i][view.headers.indexOf(series[j].name)];
+    const lines=doc.splitTextToSize(pdfText(format(raw)),slot-14);
+    maxLines=Math.max(maxLines,lines.length);
+    entries.push({i,j,lines});
+  }
+  const chartHeight=176+maxLines*10;
+  const plotTop=y+20,plotBottom=y+125,plotH=plotBottom-plotTop;
   color(doc,'#e8ecf3');for(let i=0;i<4;i++)doc.rect(x+35,plotTop+plotH*i/3,w-46,.6,'F');
-  const center=x+35+(w-47)/shown/2,group=(w-47)/shown;
   for(let i=0;i<shown;i++) {
     for(let j=0;j<series.length;j++) {
       const v=series[j].values[i];if(v===null)continue;
-      const bw=Math.max(2,Math.min(11,(group-5)/series.length));
-      const xx=center+i*group-bw*series.length/2+j*bw;
+      const bw=Math.max(3,Math.min(20,slot*.42));
+      const barCenter=x+35+i*group+(j+.5)*slot,xx=barCenter-bw/2;
       const yVal=plotBottom-(v-min)/span*plotH,yZero=plotBottom-(0-min)/span*plotH;
-      color(doc,PALETTE[j%PALETTE.length]);doc.rect(xx,Math.min(yVal,yZero),bw-1,Math.max(1,Math.abs(yVal-yZero)),'F');
-      // En estados, 0/1 representa la altura; la etiqueta es el dato original.
-      const raw=view.rows[i][view.headers.indexOf(series[j].name)];
-      const full=pdfText(format(raw));
-      const caption=full.length>10?`${full.slice(0,7)}...`:full;
-      color(doc,'#26334a','text');doc.setFont('helvetica','bold');doc.setFontSize(6);
-      doc.text(caption,xx+(bw-1)/2,v<0?Math.max(yVal,yZero)+10:Math.min(yVal,yZero)-5,{align:'center'});
+      color(doc,PALETTE[j%PALETTE.length]);doc.rect(xx,Math.min(yVal,yZero),bw,Math.max(1,Math.abs(yVal-yZero)),'F');
     }
-    color(doc,'#66758d','text');doc.setFontSize(6.5);
-    const label=pdfText(labels[i]).slice(0,10);doc.text(label,center+i*group,plotBottom+28,{align:'center'});
   }
+  // Cada barra tiene una columna de valor completa, debajo del área de barras.
+  entries.forEach(({i,j,lines})=>{
+    const center=x+35+i*group+(j+.5)*slot;
+    color(doc,'#ffffff');doc.rect(center-slot/2+3,y+136,slot-6,lines.length*10+10,'F');
+    color(doc,'#26334a','text');doc.setFont('helvetica','bold');doc.setFontSize(8);
+    lines.forEach((line,k)=>doc.text(line,center,y+149+k*10,{align:'center'}));
+  });
+  color(doc,'#66758d','text');doc.setFont('helvetica','normal');doc.setFontSize(7);
+  for(let i=0;i<shown;i++)doc.text(pdfText(labels[i]).slice(0,10),x+35+(i+.5)*group,y+161+maxLines*10,{align:'center'});
   color(doc,'#66758d','text');doc.setFontSize(8);
-  series.forEach((s,i)=>{const xx=x+i*145;color(doc,PALETTE[i%PALETTE.length]);doc.rect(xx,y+h+1,8,8,'F');color(doc,'#56637a','text');doc.text(pdfText(s.name).slice(0,21),xx+12,y+h+8);});
-  if(labels.length>shown){doc.text(`Primeros ${shown} registros graficados. La tabla incluye todos.`,x,y+h+23);}
+  series.forEach((s,i)=>{const xx=x+i*145;color(doc,PALETTE[i%PALETTE.length]);doc.rect(xx,y+chartHeight+1,8,8,'F');color(doc,'#56637a','text');doc.text(pdfText(s.name).slice(0,21),xx+12,y+chartHeight+8);});
+  if(labels.length>shown){doc.text(`Primeros ${shown} registros graficados. La tabla incluye todos.`,x,y+chartHeight+23);}
+  return chartHeight;
 }
 function drawTable(doc,board,region,filters,view,startY) {
   const left=38,right=doc.internal.pageSize.getWidth()-38,pageBottom=doc.internal.pageSize.getHeight()-40;
@@ -82,7 +95,7 @@ function addSection(doc,board,region,filters,section,view) {
   color(doc,'#26334a','text');doc.setFont('helvetica','bold');doc.setFontSize(15);doc.text(pdfText(section.title),38,y);y+=17;
   doc.setFont('helvetica','normal');doc.setFontSize(8);color(doc,'#8290a3','text');doc.text(`Fuente: ${pdfText(view.sheet)}`,38,y);y+=10;
   if(view.error){doc.text(pdfText(view.error),38,y+20);return;}
-  drawChart(doc,view,38,y,doc.internal.pageSize.getWidth()-76,155);y+=186;
+  const chartHeight=drawChart(doc,view,38,y,doc.internal.pageSize.getWidth()-76,155);y+=chartHeight+31;
   if(view.regionalTotal){color(doc,'#66758d','text');doc.text('La fuente no desglosa esta cifra por UAD: se muestra el total regional.',38,y);y+=15;}
   if(view.monthUnfiltered && filters.months.length<12){color(doc,'#66758d','text');doc.text('La fuente no tiene mes: el filtro de meses no aplica.',38,y);y+=15;}
   if(section.note){doc.text(doc.splitTextToSize(pdfText(section.note),doc.internal.pageSize.getWidth()-76),38,y);y+=17;}

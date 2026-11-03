@@ -7,6 +7,11 @@ function el(tag,attrs={},value) {
   if(value !== undefined) node.textContent=value;
   return node;
 }
+function labelLines(value) {
+  const chars=Array.from(value),lines=[];
+  for(let i=0;i<chars.length;i+=24)lines.push(chars.slice(i,i+24).join(''));
+  return lines.length?lines:[''];
+}
 export function renderChart(view) {
   const {labels,series}=chartData(view);
   const wrap=document.createElement('div');wrap.className='chart-scroll';
@@ -15,40 +20,60 @@ export function renderChart(view) {
   // La etiqueta toma el dato original de la tabla. En las series de estado,
   // el 0/1 de chartData es solo una coordenada para dibujar la barra.
   const valueLabel=(row,index)=>format(row[view.headers.indexOf(series[index].name)]);
-  const maxChars=Math.max(1,...view.rows.flatMap((row,i)=>series.map((s,j)=>
-    s.values[i]===null?0:Math.min(14,valueLabel(row,j).length))));
-  const groupWidth=Math.max(72,series.length*(Math.max(45,maxChars*6)+12));
-  const width=Math.max(560,labels.length*groupWidth+115),height=260,top=40,bottom=205;
+  let longestLine=1,maxLines=1;
+  const valueLabels=view.rows.map((row,i)=>series.map((s,j)=>{
+    if(s.values[i]===null)return null;
+    const full=valueLabel(row,j),lines=labelLines(full);
+    maxLines=Math.max(maxLines,lines.length);
+    for(const line of lines)longestLine=Math.max(longestLine,Array.from(line).length);
+    return {full,lines};
+  }));
+  const slotWidth=Math.max(78,longestLine*8.2+34);
+  const left=84,right=20,groupWidth=series.length*slotWidth;
+  const badgeHeight=maxLines*17+12;
+  const top=badgeHeight+20,bottom=top+170;
+  const width=Math.max(560,left+labels.length*groupWidth+right),height=bottom+badgeHeight+47;
   const all=series.flatMap(s=>s.values).filter(v=>v!==null);
   const min=Math.min(0,...all),max=Math.max(1,...all);
   const span=max-min || 1;
   const y=value=>bottom-(value-min)/span*(bottom-top);
   const svg=el('svg',{viewBox:`0 0 ${width} ${height}`,width,height,role:'img','aria-label':`Gráfica: ${series.map(s=>s.name).join(', ')}`});
+  svg.style.height=`${height}px`;
   for(let i=0;i<5;i++) {
     const yy=top+(bottom-top)*i/4;
     svg.append(el('line',{x1:74,y1:yy,x2:width-12,y2:yy,stroke:'#e8ecf3'}));
     svg.append(el('text',{x:68,y:yy+4,'text-anchor':'end',fill:'#77849a','font-size':11},format(max-span*i/4)));
   }
-  const gap=Math.max(54,(width-100)/labels.length);
+  const gap=(width-left-right)/labels.length;
+  const slot=gap/series.length;
+  const badges=[];
   labels.forEach((label,i)=>{
-    const cx=88+i*gap+gap/2;
+    const cx=left+i*gap+gap/2;
     series.forEach((s,j)=>{
       const v=s.values[i];if(v===null)return;
-      const bw=Math.max(5,Math.min(21,(gap-10)/series.length)),x=cx-(bw*series.length)/2+j*bw;
+      const barCenter=left+i*gap+(j+.5)*slot;
+      const bw=Math.min(32,slot*.42),x=barCenter-bw/2;
       const zero=y(0),val=y(v);
-      const bar=el('rect',{x,y:Math.min(zero,val),width:bw-2,height:Math.max(2,Math.abs(zero-val)),rx:2,fill:s.color});
-      const full=valueLabel(view.rows[i],j);
+      const bar=el('rect',{x,y:Math.min(zero,val),width:bw,height:Math.max(2,Math.abs(zero-val)),rx:3,fill:s.color});
+      const {full,lines}=valueLabels[i][j];
       bar.append(el('title',{},`${s.name}: ${full}`));
       svg.append(bar);
-      const shown=full.length>14?`${full.slice(0,13)}…`:full;
-      const labelY=v<0?Math.max(zero,val)+14:Math.min(zero,val)-6;
-      const value=el('text',{x:x+(bw-2)/2,y:labelY,'text-anchor':'middle',fill:'#26334a','font-size':10,'font-weight':700},shown);
-      value.append(el('title',{},`${s.name}: ${full}`));
-      svg.append(value);
+      const ownHeight=lines.length*17+12;
+      const ownWidth=Math.max(34,...lines.map(line=>Array.from(line).length*8.2+20));
+      const boxY=v<0?Math.max(zero,val)+8:Math.min(zero,val)-ownHeight-8;
+      const badge=el('g',{'aria-label':`${s.name}: ${full}`});
+      badge.append(el('rect',{x:barCenter-ownWidth/2,y:boxY,width:ownWidth,height:ownHeight,rx:6,fill:'#fff',stroke:'#dbe3ef'}));
+      const value=el('text',{x:barCenter,y:boxY+20,'text-anchor':'middle',fill:'#17243b','font-size':13,'font-weight':700});
+      lines.forEach((line,k)=>value.append(el('tspan',{x:barCenter,dy:k?17:0},line)));
+      badge.append(value);
+      badge.append(el('title',{},`${s.name}: ${full}`));
+      badges.push(badge);
     });
     const short=label.length>17?label.slice(0,15)+'…':label;
-    svg.append(el('text',{x:cx,y:232,'text-anchor':'middle',fill:'#64718a','font-size':10},short));
+    svg.append(el('text',{x:cx,y:bottom+badgeHeight+28,'text-anchor':'middle',fill:'#64718a','font-size':11},short));
   });
+  // Todas las etiquetas se pintan al final, por encima de cualquier barra.
+  svg.append(...badges);
   wrap.append(svg);
   const legend=document.createElement('div');legend.className='legend';
   series.forEach(s=>{const item=document.createElement('span'),dot=document.createElement('i');dot.style.background=s.color;item.append(dot,document.createTextNode(s.name));legend.append(item);});
