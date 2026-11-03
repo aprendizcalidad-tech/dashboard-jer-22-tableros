@@ -23,8 +23,9 @@ function drawChart(doc,view,x,y,w,h) {
   const {labels,series}=chartData(view);
   const values=series.flatMap(s=>s.values).filter(v=>v!==null);
   if(!values.length){color(doc,'#738098','text');doc.setFontSize(10);doc.text('Todavía no hay valores para graficar.',x+14,y+35);return;}
-  const shown=Math.min(labels.length,14),min=Math.min(0,...values),max=Math.max(1,...values),span=max-min||1;
-  const plotTop=y+16,plotBottom=y+h-28,plotH=plotBottom-plotTop;
+  const maxBars=Math.max(4,Math.floor((w-47)/(series.length*38)));
+  const shown=Math.min(labels.length,14,maxBars),min=Math.min(0,...values),max=Math.max(1,...values),span=max-min||1;
+  const plotTop=y+22,plotBottom=y+h-42,plotH=plotBottom-plotTop;
   color(doc,'#e8ecf3');for(let i=0;i<4;i++)doc.rect(x+35,plotTop+plotH*i/3,w-46,.6,'F');
   const center=x+35+(w-47)/shown/2,group=(w-47)/shown;
   for(let i=0;i<shown;i++) {
@@ -34,9 +35,15 @@ function drawChart(doc,view,x,y,w,h) {
       const xx=center+i*group-bw*series.length/2+j*bw;
       const yVal=plotBottom-(v-min)/span*plotH,yZero=plotBottom-(0-min)/span*plotH;
       color(doc,PALETTE[j%PALETTE.length]);doc.rect(xx,Math.min(yVal,yZero),bw-1,Math.max(1,Math.abs(yVal-yZero)),'F');
+      // En estados, 0/1 representa la altura; la etiqueta es el dato original.
+      const raw=view.rows[i][view.headers.indexOf(series[j].name)];
+      const full=pdfText(format(raw));
+      const caption=full.length>10?`${full.slice(0,7)}...`:full;
+      color(doc,'#26334a','text');doc.setFont('helvetica','bold');doc.setFontSize(6);
+      doc.text(caption,xx+(bw-1)/2,v<0?Math.max(yVal,yZero)+10:Math.min(yVal,yZero)-5,{align:'center'});
     }
     color(doc,'#66758d','text');doc.setFontSize(6.5);
-    const label=pdfText(labels[i]).slice(0,10);doc.text(label,center+i*group,plotBottom+12,{align:'center'});
+    const label=pdfText(labels[i]).slice(0,10);doc.text(label,center+i*group,plotBottom+28,{align:'center'});
   }
   color(doc,'#66758d','text');doc.setFontSize(8);
   series.forEach((s,i)=>{const xx=x+i*145;color(doc,PALETTE[i%PALETTE.length]);doc.rect(xx,y+h+1,8,8,'F');color(doc,'#56637a','text');doc.text(pdfText(s.name).slice(0,21),xx+12,y+h+8);});

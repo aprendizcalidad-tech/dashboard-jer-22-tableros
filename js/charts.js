@@ -12,7 +12,13 @@ export function renderChart(view) {
   const wrap=document.createElement('div');wrap.className='chart-scroll';
   const has=series.some(s=>s.values.some(v=>v !== null));
   if(!has) {wrap.classList.add('empty-chart');wrap.textContent='Todavía no hay valores para graficar.';return wrap;}
-  const width=Math.max(560,labels.length*64+115),height=260,top=20,bottom=205;
+  // La etiqueta toma el dato original de la tabla. En las series de estado,
+  // el 0/1 de chartData es solo una coordenada para dibujar la barra.
+  const valueLabel=(row,index)=>format(row[view.headers.indexOf(series[index].name)]);
+  const maxChars=Math.max(1,...view.rows.flatMap((row,i)=>series.map((s,j)=>
+    s.values[i]===null?0:Math.min(14,valueLabel(row,j).length))));
+  const groupWidth=Math.max(72,series.length*(Math.max(45,maxChars*6)+12));
+  const width=Math.max(560,labels.length*groupWidth+115),height=260,top=40,bottom=205;
   const all=series.flatMap(s=>s.values).filter(v=>v!==null);
   const min=Math.min(0,...all),max=Math.max(1,...all);
   const span=max-min || 1;
@@ -30,7 +36,15 @@ export function renderChart(view) {
       const v=s.values[i];if(v===null)return;
       const bw=Math.max(5,Math.min(21,(gap-10)/series.length)),x=cx-(bw*series.length)/2+j*bw;
       const zero=y(0),val=y(v);
-      svg.append(el('rect',{x,y:Math.min(zero,val),width:bw-2,height:Math.max(2,Math.abs(zero-val)),rx:2,fill:s.color}));
+      const bar=el('rect',{x,y:Math.min(zero,val),width:bw-2,height:Math.max(2,Math.abs(zero-val)),rx:2,fill:s.color});
+      const full=valueLabel(view.rows[i],j);
+      bar.append(el('title',{},`${s.name}: ${full}`));
+      svg.append(bar);
+      const shown=full.length>14?`${full.slice(0,13)}…`:full;
+      const labelY=v<0?Math.max(zero,val)+14:Math.min(zero,val)-6;
+      const value=el('text',{x:x+(bw-2)/2,y:labelY,'text-anchor':'middle',fill:'#26334a','font-size':10,'font-weight':700},shown);
+      value.append(el('title',{},`${s.name}: ${full}`));
+      svg.append(value);
     });
     const short=label.length>17?label.slice(0,15)+'…':label;
     svg.append(el('text',{x:cx,y:232,'text-anchor':'middle',fill:'#64718a','font-size':10},short));
