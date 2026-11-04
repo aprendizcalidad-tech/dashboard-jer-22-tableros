@@ -19,25 +19,60 @@ export function format(value) {
   if (typeof value === 'number') return new Intl.NumberFormat('es-CO',{maximumFractionDigits:2}).format(value);
   return String(value);
 }
+export function percentValue(value) {
+  if(typeof value==='string' && value.includes('%'))return numeric(value);
+  const n=numeric(value);
+  return n===null?null:Math.abs(n)<=1?n*100:n;
+}
+function statusPercentage(value) {
+  if(typeof value!=='number' && !/^\s*\d+(?:[.,]\d+)?\s*$/.test(String(value??'')))return null;
+  const n=numeric(value);
+  return n!==null && n>=0 && n<=1?n*100:null;
+}
+export function formatCell(value,header,view) {
+  if(!view?.percentColumns?.includes(header))return format(value);
+  if(typeof value==='string' && value.includes('%'))return value;
+  const n=view.status?statusPercentage(value):percentValue(value);
+  return n===null?format(value):`${format(n)} %`;
+}
 export function monthOf(value) {
   const s = normalize(value);
-  return MONTHS.indexOf(s);
+  const parts=s.split(/[^A-Z]+/);
+  return MONTHS.findIndex(m=>parts.includes(m));
 }
 export function filtersFor(globalFilters, override = {}) {
   return {
     months: override.months?.length ? override.months : globalFilters.months,
+    years: Object.hasOwn(override,'years') ? override.years : (globalFilters.years ?? []),
     region: override.region ?? globalFilters.region,
     zone: override.zone ?? globalFilters.zone,
     obligation: override.obligation ?? globalFilters.obligation
   };
 }
-export function getView(dataset, spec, region, zone='ALL') {
+export function getView(dataset, spec, region, zone='ALL', years=[]) {
   if (!spec || !dataset) return null;
+  const isYear=h=>/^(19|20)\d{2}$/.test(String(h).trim());
+  const annual=dataset.headers.filter(h=>isYear(h) && (!years.length || years.includes(Number(h)))).sort((a,b)=>Number(a)-Number(b));
+  const annualSpec=spec.columns.some(isYear);
+  const expand=list=>{
+    let inserted=false;
+    return list.flatMap(h=>{
+      if(!isYear(h))return [h];
+      if(inserted)return [];
+      inserted=true;
+      return annual;
+    });
+  };
+  // Las columnas de cumplimiento del libro no identifican a cuál año pertenecen.
+  const sourceColumns=annualSpec && years.length
+    ? spec.columns.filter(h=>!normalize(h).startsWith('CUMPLIMIENTO')) : spec.columns;
+  const columns=spec.allColumns?dataset.headers.slice():annualSpec?expand(sourceColumns):sourceColumns;
+  const selectedSeries=annualSpec?expand(spec.series):spec.series;
   const offset = spec.columnOffset || 0;
   const headers = dataset.headers || [];
   const index = key => headers.findIndex((h,i)=>i >= offset && normalize(h) === normalize(key));
-  const idx = spec.columns.map(index);
-  if (idx.some(i=>i < 0)) return { error:`Faltan columnas en «${spec.sheet}»: ${spec.columns.filter((_,i)=>idx[i]<0).join(', ')}`, headers:[],rows:[] };
+  const idx = spec.allColumns ? columns.map((_,i)=>i) : columns.map(index);
+  if (idx.some(i=>i < 0)) return { error:`Faltan columnas en «${spec.sheet}»: ${columns.filter((_,i)=>idx[i]<0).join(', ')}`, headers:[],rows:[] };
   const whereIdx = spec.where ? index(spec.where[0]) : -1;
   const zoneIdx = spec.zone ? index(spec.zone) : -1;
   const rows = (dataset.rows || []).filter(row => {
@@ -49,31 +84,42 @@ export function getView(dataset, spec, region, zone='ALL') {
     }
     return idx.some(i=>row[i] !== null && row[i] !== '');
   }).map(row=>idx.map(i=>row[i]));
-  const labelIdx = spec.columns.indexOf(spec.label);
+  const labelIdx = columns.indexOf(spec.label);
   if (labelIdx >= 0 && spec.label.match(/MES/)) {
     rows.sort((a,b)=>monthOf(a[labelIdx])-monthOf(b[labelIdx]));
   }
   const aggregateOnly = zone !== 'ALL' && zoneIdx >= 0 && rows.length>0 && rows.every(row=>{
-    const z=normalize(row[spec.columns.indexOf(spec.zone)]);
+    const z=normalize(row[columns.indexOf(spec.zone)]);
     return z==='TODAS' || z==='AMAZONAS';
   });
-  return { headers:spec.columns,rows,series:spec.series,label:spec.label,status:!!spec.status,
+  return { headers:columns,rows,series:selectedSeries,label:spec.label,status:!!spec.status,
+    percentColumns:spec.percentColumns||[],chartType:spec.chartType,totalColumn:spec.totalColumn,
+    categoryColumn:spec.categoryColumn,secondarySeries:spec.secondarySeries,
+    noChart:!!spec.noChart,metric:spec.metric,
     regionalTotal:(zone !== 'ALL' && zoneIdx < 0) || aggregateOnly,
-    monthUnfiltered:dataset.monthFilterable===false, region, sheet:spec.sheet };
+    monthUnfiltered:dataset.monthFilterable===false,
+    yearUnavailable:years.length>0 && (dataset.yearFilterable===false || (annualSpec && !annual.length)),
+    region, sheet:spec.sheet };
 }
 export function chartData(view) {
   if (!view || !view.rows?.length) return {labels:[],series:[]};
   const labelIndex = view.headers.indexOf(view.label);
   const zoneIndex = view.headers.indexOf('ZONA');
+  const categoryIndex = view.categoryColumn ? view.headers.indexOf(view.categoryColumn) : -1;
   const labels = view.rows.map((r,i)=>{
     const label = labelIndex >= 0 ? format(r[labelIndex]) : `Registro ${i+1}`;
     const zone = zoneIndex >= 0 && zoneIndex !== labelIndex ? ` · ${format(r[zoneIndex])}` : '';
-    return label + zone;
+    const category = categoryIndex >= 0 ? ` · ${format(r[categoryIndex])}` : '';
+    return label + zone + category;
   });
   const series = (view.series || []).map((name,i)=>{
     const index = view.headers.indexOf(name);
     return {name,color:['#5348e5','#1590b8','#ef9b22','#23a782','#a464ce'][i%5],
       values:view.rows.map(row=>{
+        if(view.percentColumns?.includes(name)) {
+          const number=view.status?statusPercentage(row[index]):percentValue(row[index]);
+          if(number!==null)return number;
+        }
         if(!view.status)return numeric(row[index]);
         const val=normalize(row[index]);
         if(!val || val==='NA' || val==='N/A')return null;
@@ -81,7 +127,7 @@ export function chartData(view) {
         return 1; // Se grafica presencia/estado, no la magnitud de un número de radicado.
       })};
   });
-  return { labels,series };
+  return { labels,series,type:view.chartType,secondarySeries:view.secondarySeries };
 }
 
 export function isConfigured(config) {

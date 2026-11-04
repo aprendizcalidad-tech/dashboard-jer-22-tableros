@@ -19,6 +19,7 @@
       <span id="signed-user" class="user-email"></span>
       <button id="refresh" type="button" class="button subtle">Actualizar</button>
       <button id="pdf-current" type="button" class="button subtle">PDF de esta pestaña</button>
+      <button id="pdf-summary" type="button" class="button secondary">PDF resumido</button>
       <button id="pdf-all" type="button" class="button primary">Informe PDF completo</button>
       <button id="logout" type="button" class="button subtle">Salir</button>
     </div>
@@ -40,11 +41,12 @@
       <div class="heading"><div><span class="eyebrow">PANEL CONTRACTUAL</span><h1>Informe de gestión</h1><p>Explora cada obligación y consulta sus datos por región y UAD.</p></div><span class="connection" id="connection">Conectando…</span></div>
       <form id="global-filters" class="filter-bar">
         <div class="filter-head"><strong>Filtros globales</strong><small>Se aplican a todos los tableros, salvo los que tengan ajuste individual.</small></div>
-        <label>Período<select id="period"><option value="ALL">Año completo</option><option value="Q1">Trimestre 1</option><option value="Q2">Trimestre 2</option><option value="Q3">Trimestre 3</option><option value="Q4">Trimestre 4</option><option value="H1">Semestre 1</option><option value="H2">Semestre 2</option><option value="CUSTOM">Elegir meses</option></select></label>
+        <label>Meses / período<select id="period"><option value="ALL">Todos los meses</option><option value="Q1">Trimestre 1</option><option value="Q2">Trimestre 2</option><option value="Q3">Trimestre 3</option><option value="Q4">Trimestre 4</option><option value="H1">Semestre 1</option><option value="H2">Semestre 2</option><option value="CUSTOM">Elegir meses</option></select></label>
         <label>Departamento<select id="region"><option value="both">Boyacá y Amazonas</option><option value="boy">Boyacá</option><option value="amz">Amazonas</option></select></label>
         <label>UAD / zona<select id="zone"><option value="ALL">Todas las UAD</option></select></label>
         <label>Obligación<select id="obligation"><option value="ALL">Todas las obligaciones</option></select></label>
         <button type="submit" class="button primary apply">Aplicar filtros</button>
+        <fieldset class="month-picks" aria-label="Años elegidos"><legend>Años incluidos (elige uno, varios o todos)</legend><div id="year-chips"></div></fieldset>
         <fieldset id="month-picks" class="month-picks" aria-label="Meses elegidos"><legend>Meses incluidos</legend><div id="month-chips"></div></fieldset>
       </form>
 
@@ -58,7 +60,9 @@
   <dialog id="override-dialog" class="override-dialog"><form id="override-form" method="dialog">
     <header><div><span class="eyebrow">CONFIGURACIÓN INDIVIDUAL</span><h2>Filtros de esta pestaña</h2></div><button id="close-dialog" class="icon-button" type="button" aria-label="Cerrar">×</button></header>
     <p>«Heredar» conserva el filtro global. Los cambios de esta pestaña se guardan en este navegador.</p>
-    <label>Meses<select id="override-period"><option value="INHERIT">Heredar meses globales</option><option value="ALL">Año completo</option><option value="Q1">Trimestre 1</option><option value="Q2">Trimestre 2</option><option value="Q3">Trimestre 3</option><option value="Q4">Trimestre 4</option><option value="H1">Semestre 1</option><option value="H2">Semestre 2</option><option value="CUSTOM">Elegir meses para esta pestaña</option></select></label>
+    <label>Años<select id="override-year-mode"><option value="INHERIT">Heredar años globales</option><option value="ALL">Todos los años</option><option value="CUSTOM">Elegir años para esta pestaña</option></select></label>
+    <div id="override-years" class="override-months" hidden></div>
+    <label>Meses<select id="override-period"><option value="INHERIT">Heredar meses globales</option><option value="ALL">Todos los meses</option><option value="Q1">Trimestre 1</option><option value="Q2">Trimestre 2</option><option value="Q3">Trimestre 3</option><option value="Q4">Trimestre 4</option><option value="H1">Semestre 1</option><option value="H2">Semestre 2</option><option value="CUSTOM">Elegir meses para esta pestaña</option></select></label>
     <div id="override-months" class="override-months" hidden></div>
     <label>Departamento<select id="override-region"><option value="INHERIT">Heredar departamento</option><option value="both">Boyacá y Amazonas</option><option value="boy">Boyacá</option><option value="amz">Amazonas</option></select></label>
     <label>UAD / zona<select id="override-zone"><option value="INHERIT">Heredar UAD</option><option value="ALL">Todas las UAD</option></select></label>

@@ -3,16 +3,17 @@ import { BOARDS, MONTHS, REGIONS, UADS, OBLIGATIONS } from './catalog.js';
 import { chartData, filtersFor, format, getView, isConfigured, normalize, numeric, requestAppsScript } from './data.js';
 import { renderChart, renderTable } from './charts.js';
 import { createReport } from './pdf.js';
+import { salesIndicators, sectionMetric } from './metrics.js';
 import { initAuth, currentUser, token, login, register, resetPassword, logout } from './auth.js';
 
 const $=id=>document.getElementById(id);
 const STORE='jer_dashboard_overrides_v1';
-const state={board:1,global:{months:MONTHS.slice(),region:'both',zone:'ALL',obligation:'ALL'},overrides:{},response:null,epoch:0};
+const state={board:1,availableYears:[],global:{months:MONTHS.slice(),years:null,region:'both',zone:'ALL',obligation:'ALL'},overrides:{},response:null,epoch:0};
 try {state.overrides=JSON.parse(localStorage.getItem(STORE) || '{}') || {};} catch (_) {}
 
 function message(text='',error=false) { $('status').textContent=text;$('status').classList.toggle('error',error); }
 function authMessage(text='',error=false) { $('auth-status').textContent=text;$('auth-status').classList.toggle('error',error); }
-function buttonDisabled(disabled) {for(const id of ['refresh','pdf-current','pdf-all']) $(id).disabled=disabled;}
+function buttonDisabled(disabled) {for(const id of ['refresh','pdf-current','pdf-summary','pdf-all']) $(id).disabled=disabled;}
 function elt(tag,className,text) {const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=text;return n;}
 function effective(boardId=state.board) {return filtersFor(state.global,state.overrides[boardId]);}
 function selectedRegions(filters) {
@@ -42,6 +43,32 @@ function renderMonths() {
     state.global.months=MONTHS.filter(x=>set.has(x));$('period').value='CUSTOM';renderMonths();
   });
 }
+function yearButtons(root,selected,onClick,showAll=false) {
+  root.replaceChildren();
+  if(showAll){
+    const all=elt('button',`month-chip ${selected.length?'':'active'}`,'Todos');
+    all.type='button';all.setAttribute('aria-pressed',!selected.length);
+    all.addEventListener('click',()=>onClick(null));root.append(all);
+  }
+  state.availableYears.forEach(year=>{
+    const active=selected.includes(year);
+    const b=elt('button',`month-chip ${active?'active':''}`,String(year));
+    b.type='button';b.setAttribute('aria-pressed',active);
+    b.addEventListener('click',()=>onClick(year));root.append(b);
+  });
+}
+function renderYears() {
+  yearButtons($('year-chips'),state.global.years||[],year=>{
+    if(year===null)state.global.years=[];
+    else {
+      const set=new Set(state.global.years||[]);
+      if(set.has(year)&&set.size===1)return;
+      set.has(year)?set.delete(year):set.add(year);
+      state.global.years=[...set].sort((a,b)=>a-b);
+    }
+    renderYears();
+  },true);
+}
 function fillZone(select,region,includeInherit=false) {
   const previous=select.value;
   select.replaceChildren();
@@ -56,6 +83,7 @@ function setupSelects() {
     $('obligation').add(new Option(title,key));
   }
   fillZone($('zone'),'both');fillZone($('override-zone'),'both',true);renderMonths();
+  renderYears();
   $('period').addEventListener('change',()=>{state.global.months=preset($('period').value)||state.global.months;renderMonths();});
   $('region').addEventListener('change',()=>fillZone($('zone'),$('region').value));
   $('override-region').addEventListener('change',()=>fillZone($('override-zone'),$('override-region').value==='INHERIT'?$('region').value:$('override-region').value,true));
@@ -63,8 +91,10 @@ function setupSelects() {
     $('override-months').hidden=$('override-period').value!=='CUSTOM';
     renderOverrideMonths();
   });
+  $('override-year-mode').addEventListener('change',renderOverrideYears);
   $('global-filters').addEventListener('submit',e=>{
-    e.preventDefault();state.global.region=$('region').value;state.global.zone=$('zone').value;
+    e.preventDefault();if(state.global.years===null)return message('Espera a que carguen los años disponibles.',true);
+    state.global.region=$('region').value;state.global.zone=$('zone').value;
     state.global.obligation=$('obligation').value;
     renderNav();loadBoard();
   });
@@ -91,6 +121,7 @@ function renderNav() {
 }
 function selectOverride() {
   delete state.draftMonths;
+  delete state.draftYears;
   const o=state.overrides[state.board] || {};
   const board=BOARDS.find(b=>b.id===state.board);
   const select=$('override-obligation');
@@ -100,9 +131,24 @@ function selectOverride() {
   fillZone($('override-zone'),o.region??state.global.region,true);
   $('override-zone').value=o.zone??'INHERIT';
   $('override-obligation').value=o.obligation??'INHERIT';
+  $('override-year-mode').value=Object.hasOwn(o,'years')?(o.years.length?'CUSTOM':'ALL'):'INHERIT';
+  renderOverrideYears();
   $('override-period').value=o.months?'CUSTOM':'INHERIT';
   $('override-months').hidden=!o.months;
   renderOverrideMonths();$('override-dialog').showModal();
+}
+function renderOverrideYears() {
+  const custom=$('override-year-mode').value==='CUSTOM';
+  $('override-years').hidden=!custom;
+  if(!custom)return;
+  const selected=state.draftYears || (state.overrides[state.board]?.years?.length?state.overrides[state.board].years:null)
+    || (state.global.years?.length?state.global.years:null) || state.availableYears.slice(-1);
+  yearButtons($('override-years'),selected,year=>{
+    const set=new Set(state.draftYears || selected);
+    if(set.has(year)&&set.size===1)return;
+    set.has(year)?set.delete(year):set.add(year);
+    state.draftYears=[...set].sort((a,b)=>a-b);renderOverrideYears();
+  });
 }
 function renderOverrideMonths() {
   const selected=state.draftMonths || state.overrides[state.board]?.months || state.global.months;
@@ -118,11 +164,16 @@ function saveOverride() {
   const o={};
   const pr=get('override-period');
   if(pr!=='INHERIT')o.months=preset(pr)||(state.draftMonths || state.overrides[state.board]?.months || state.global.months);
+  const ym=get('override-year-mode');
+  if(ym==='ALL')o.years=[];
+  if(ym==='CUSTOM')o.years=state.draftYears || (state.overrides[state.board]?.years?.length?state.overrides[state.board].years:null)
+    || (state.global.years?.length?state.global.years:null) || state.availableYears.slice(-1);
   if(get('override-region')!=='INHERIT')o.region=get('override-region');
   if(get('override-zone')!=='INHERIT')o.zone=get('override-zone');
   if(get('override-obligation')!=='INHERIT')o.obligation=get('override-obligation');
   if(Object.keys(o).length)state.overrides[state.board]=o;else delete state.overrides[state.board];
   delete state.draftMonths;
+  delete state.draftYears;
   localStorage.setItem(STORE,JSON.stringify(state.overrides));
   $('override-dialog').close();renderNav();loadBoard();
 }
@@ -131,18 +182,23 @@ function setRegionTitle(region) {
 }
 function sectionView(board,section,region,response,filters) {
   const spec=section[region];
-  return spec ? getView(response.data?.[region]?.[spec.sheet],spec,region,filters.zone) : null;
+  return spec ? getView(response.data?.[region]?.[spec.sheet],spec,region,filters.zone,filters.years) : null;
 }
 function renderSection(section,view,region,filters) {
   const card=elt('article','topic');
-  const header=elt('header');header.append(elt('h4','',section.title),elt('small','',`${REGIONS[region]} · ${view.sheet}`));card.append(header);
+  const header=elt('header');header.append(elt('h4','',region==='amz'&&section.amzTitle?section.amzTitle:section.title),elt('small','',`${REGIONS[region]} · ${view.sheet}`));card.append(header);
   if(view.error){card.append(elt('p','message error',view.error));return card;}
-  const pair=elt('div','pair');
+  const pair=elt('div',view.noChart?'pair table-only':'pair');
   const tablePanel=elt('div'),chartPanel=elt('div');
   tablePanel.append(elt('h5','','Tabla'),renderTable(view));
-  chartPanel.append(elt('h5','','Gráfica'),renderChart(view));pair.append(tablePanel,chartPanel);card.append(pair);
+  pair.append(tablePanel);
+  if(!view.noChart){chartPanel.append(elt('h5','','Gráfica'),renderChart(view));pair.append(chartPanel);}
+  const metric=sectionMetric(view);
+  if(metric)card.append(summaryCard(metric.title,metric.value,metric.note));
+  card.append(pair);
   if(!view.rows.length)card.append(elt('p','data-note','La hoja existe, pero no contiene registros para estos filtros.'));
   if(view.regionalTotal)card.append(elt('p','data-note','Esta hoja no separa datos por UAD. Se muestra el total regional.'));
+  if(view.yearUnavailable)card.append(elt('p','data-note','Esta fuente no identifica el año seleccionado. No se atribuyen sus datos a ese año.'));
   if(view.monthUnfiltered && filters.months.length<12)card.append(elt('p','data-note','Esta hoja no tiene mes. El filtro de meses no modifica sus registros.'));
   if(section.note)card.append(elt('p','topic-note',section.note));
   if(section.provisional)card.append(elt('p','topic-note','Venta por modalidad está ubicada provisionalmente en la pestaña 22, según la última anotación del boceto.'));
@@ -160,21 +216,35 @@ function overview(region,response,filters) {
   const chanceName='Ventas Chance',apName=region==='boy'?'Ventas AP':'Ventas';
   const chanceSpec={sheet:chanceName,columns:['MES','2025','2026'],label:'MES',series:['2025','2026']};
   const apSpec={sheet:apName,columns:['MES','2025','2026'],label:'MES',series:['2025','2026']};
-  const chance=getView(book[chanceName],chanceSpec,region,filters.zone);
-  const ap=getView(book[apName],apSpec,region,filters.zone);
-  const rights=getView(book['Derechos de explotación'],{sheet:'Derechos de explotación',columns:['MES','EFECTIVIDAD'],label:'MES',series:['EFECTIVIDAD']},region,filters.zone);
+  const chance=getView(book[chanceName],chanceSpec,region,filters.zone,filters.years);
+  const ap=getView(book[apName],apSpec,region,filters.zone,filters.years);
+  const rights=getView(book['Derechos de explotación'],{sheet:'Derechos de explotación',columns:['MES','EFECTIVIDAD'],label:'MES',series:['EFECTIVIDAD']},region,filters.zone,filters.years);
   if(!chance&&!ap&&!rights)return null;
   root.append(setRegionTitle(region));
+  const indicators=salesIndicators(book,region,filters);
+  if(indicators.length){
+    const row=elt('div','year-indicators');
+    indicators.forEach(({year,total,compliance,note})=>{
+      const tile=elt('article','year-indicator');
+      tile.append(elt('h4','',`Ventas ${year} · ${REGIONS[region]}`),elt('strong','',total),
+        elt('span','',`Cumplimiento ${year}: ${compliance}`),elt('small','',note));
+      row.append(tile);
+    });
+    root.append(row);
+  }
   const grid=elt('div','summary-grid');
-  grid.append(summaryCard('Ventas Chance',chance?renderChart(chance):'Sin hoja de origen','Comparativo mensual 2025 y 2026.'));
-  grid.append(summaryCard('Ventas apuestas permanentes',ap?renderChart(ap):'Sin hoja de origen',region==='amz'?'El libro Amazonas la llama «Ventas».':'Comparativo mensual 2025 y 2026.'));
-  const valid=chance?.rows.map(r=>[numeric(r[1]),numeric(r[2])]).filter(([a,b])=>a!==null&&b!==null&&a!==0) || [];
+  grid.append(summaryCard('Ventas Chance',chance?renderChart(chance):'Sin hoja de origen',`Ventas de ${chance?.series?.join(' y ')||'los años elegidos'}.`));
+  grid.append(summaryCard(region==='amz'?'Ventas Amazonas':'Ventas apuestas permanentes',ap?renderChart(ap):'Sin hoja de origen',region==='amz'?'Ventas de Amazonas según los años seleccionados.':`Ventas de ${ap?.series?.join(' y ')||'los años elegidos'}.`));
+  const comparison=chance?.series?.filter(x=>/^\d{4}$/.test(x)).sort((a,b)=>Number(a)-Number(b))||[];
+  const prior=comparison.at(-2),latest=comparison.at(-1);
+  const priorIdx=chance?.headers.indexOf(prior),latestIdx=chance?.headers.indexOf(latest);
+  const valid=prior&&latest?chance.rows.map(r=>[numeric(r[priorIdx]),numeric(r[latestIdx])]).filter(([a,b])=>a!==null&&b!==null&&a!==0):[];
   const base=valid.reduce((t,r)=>t+r[0],0),actual=valid.reduce((t,r)=>t+r[1],0);
-  const ratio=base?`${new Intl.NumberFormat('es-CO',{maximumFractionDigits:1}).format(actual/base*100)} %`:'Sin dato';
-  grid.append(summaryCard('Cumplimiento Chance del período',ratio,'Suma de ventas 2026 ÷ suma de 2025 para meses con ambas cifras.'));
+  const ratio=base?`${new Intl.NumberFormat('es-CO',{maximumFractionDigits:1}).format(actual/base*100)} %`:'Sin comparativo';
+  grid.append(summaryCard('Cumplimiento Chance del período',ratio,prior&&latest?`Ventas ${latest} ÷ ventas ${prior} de los meses elegidos.`:'Elige al menos dos años con ventas para calcular la comparación.'));
   const rightsRows=rights?.rows.filter(r=>r[1]!==null && r[1]!==undefined)||[];
-  const last=rightsRows.at(-1);
-  grid.append(summaryCard('Efectividad derechos de explotación',last?format(last[1]):'Sin dato',last?`Último mes con registro: ${last[0]}. Valor literal del Excel.`:'No hay valor para los meses elegidos.'));
+  const last=rights?.yearUnavailable?null:rightsRows.at(-1);
+  grid.append(summaryCard('Efectividad derechos de explotación',last?format(last[1]):'Sin dato',rights?.yearUnavailable?'La fuente no identifica el año seleccionado.':last?`Último mes con registro: ${last[0]}. Valor literal del Excel.`:'No hay valor para los meses elegidos.'));
   if(region==='boy') {
     if(book['REQUERIMIENTOS'])grid.append(summaryCard('Requerimientos · respuestas %','Sin fórmula definida','La hoja no incluye estado de respuesta ni total esperado.'));
     if(book['CAPACITACIONES '])grid.append(summaryCard('Capacitación %','Sin meta definida','La hoja no incluye una meta para calcular este porcentaje.'));
@@ -200,6 +270,22 @@ function renderBoard(board,response,filters) {
 async function fetchBoard(boardId,filters) {
   return requestAppsScript(CONFIG.appsScriptUrl,{action:'board',board:boardId,filters,idToken:await token()});
 }
+async function initializeYears() {
+  const epoch=state.epoch;
+  message('Buscando los años disponibles…');buttonDisabled(true);
+  try {
+    const result=await requestAppsScript(CONFIG.appsScriptUrl,{action:'years',idToken:await token()});
+    if(epoch!==state.epoch || !currentUser())return;
+    state.availableYears=result.years.filter(y=>Number.isInteger(y)).sort((a,b)=>a-b);
+    if(state.global.years===null)state.global.years=state.availableYears.length?state.availableYears.slice(-1):[];
+    else if(state.global.years.length){
+      state.global.years=state.global.years.filter(y=>state.availableYears.includes(y));
+      if(!state.global.years.length && state.availableYears.length)state.global.years=state.availableYears.slice(-1);
+    }
+    renderYears();await loadBoard();
+  }catch(error){if(epoch===state.epoch)message(error.message,true);}
+  finally{if(epoch===state.epoch)buttonDisabled(false);}
+}
 async function loadBoard() {
   const board=BOARDS.find(b=>b.id===state.board),filters=effective();
   const epoch=++state.epoch;
@@ -213,7 +299,7 @@ async function loadBoard() {
     state.response=null;$('connection').textContent='Sin conexión';message(error.message,true);
   }finally {if(epoch===state.epoch)buttonDisabled(false);}
 }
-async function exportReport(all=false) {
+async function exportReport(all=false,mode='full') {
   if(!window.jspdf?.jsPDF){message('No cargó jsPDF. Comprueba la conexión y vuelve a intentar.',true);return;}
   buttonDisabled(true);
   try {
@@ -226,8 +312,8 @@ async function exportReport(all=false) {
       const response=!all&&state.response?state.response:await fetchBoard(b.id,filters);
       results.push({board:b,response,filters});
     }
-    await createReport(results);
-    message(`PDF ${all?'completo':'de la pestaña'} generado.`);
+    await createReport(results,{mode});
+    message(`PDF ${mode==='summary'?'resumido':all?'completo':'de la pestaña'} generado.`);
   } catch(error) {message('No se pudo descargar el PDF: '+error.message,true);}
   finally {buttonDisabled(false);}
 }
@@ -250,14 +336,15 @@ function bindAuthForms() {
 }
 async function start() {
   setupSelects();bindAuthForms();
-  $('refresh').addEventListener('click',loadBoard);
+  $('refresh').addEventListener('click',initializeYears);
   $('pdf-current').addEventListener('click',()=>exportReport(false));
+  $('pdf-summary').addEventListener('click',()=>exportReport(true,'summary'));
   $('pdf-all').addEventListener('click',()=>exportReport(true));
   $('individual-settings').addEventListener('click',selectOverride);
-  $('close-dialog').addEventListener('click',()=>{$('override-dialog').close();delete state.draftMonths;});
+  $('close-dialog').addEventListener('click',()=>{$('override-dialog').close();delete state.draftMonths;delete state.draftYears;});
   $('override-form').addEventListener('submit',e=>{e.preventDefault();saveOverride();});
   $('clear-override').addEventListener('click',()=>{
-    delete state.overrides[state.board];delete state.draftMonths;localStorage.setItem(STORE,JSON.stringify(state.overrides));
+    delete state.overrides[state.board];delete state.draftMonths;delete state.draftYears;localStorage.setItem(STORE,JSON.stringify(state.overrides));
     $('override-dialog').close();renderNav();loadBoard();
   });
   if(!isConfigured(CONFIG)){$('setup').hidden=false;return;}
@@ -265,7 +352,7 @@ async function start() {
     await initAuth((user,info)=>{
       state.epoch++;state.response=null;$('dashboard').replaceChildren();
       $('login-screen').hidden=!!user;$('workspace').hidden=!user;$('top-actions').hidden=!user;
-      if(user){$('signed-user').textContent=user.email;renderNav();loadBoard();}
+      if(user){$('signed-user').textContent=user.email;renderNav();initializeYears();}
       else if(info)authMessage(info,true);
     });
   } catch(error){$('login-screen').hidden=false;authMessage(error.message,true);}
