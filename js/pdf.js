@@ -183,6 +183,56 @@ function addOverview(doc,board,region,filters,response) {
   if(region==='boy')facts.push(['Requerimientos · respuestas %','Sin fórmula definida'],['Capacitación %','Sin meta definida']);
   facts.forEach(([label,value])=>{doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text(pdfText(label),38,y);doc.setFont('helvetica','normal');doc.text(pdfText(value),400,y);y+=28;});
 }
+function sectionSummary(view) {
+  const labelIndex=view.headers.indexOf(view.label);
+  const period=row=>labelIndex<0?'último registro':format(row[labelIndex]);
+  const metric=sectionMetric(view);
+  const result=[];
+  if(view.chartType==='stacked' && view.totalColumn){
+    const amount=name=>{
+      const index=view.headers.indexOf(name);
+      const values=view.rows.map(row=>numeric(row[index])).filter(value=>value!==null);
+      return values.length?format(values.reduce((sum,value)=>sum+value,0)):null;
+    };
+    const total=amount(view.totalColumn);
+    if(total)result.push(`En ${view.rows.length} registros, los premios caducos sumaron ${total}. ${view.series.map(name=>`${name}: ${amount(name)??'sin dato'}`).join('; ')}.`);
+    return result;
+  }
+  if(metric)result.push(`${metric.title}: ${metric.value}.`);
+  if(view.categoryColumn){
+    const last=view.rows.at(-1),latest=view.rows.filter(row=>row[labelIndex]===last[labelIndex]);
+    const categoryIndex=view.headers.indexOf(view.categoryColumn);
+    const names=view.series.filter(name=>name!=='VENTA TOTAL');
+    const totalIndex=view.headers.indexOf('VENTA TOTAL');
+    if(totalIndex>=0)result.push(`En ${period(last)}, la venta total registrada fue ${format(last[totalIndex])}.`);
+    latest.forEach(row=>result.push(`${format(row[categoryIndex])}: ${names.map(name=>`${name} ${formatCell(row[view.headers.indexOf(name)],name,view)}`).join('; ')}.`));
+    return result;
+  }
+  if(view.noChart || !view.series.length){
+    const last=view.rows.at(-1);
+    const fields=view.headers.map((name,index)=>({name,value:last[index]}))
+      .filter(({name,value},index)=>index!==labelIndex && value!==null && value!==undefined && value!=='').slice(0,2);
+    result.push(`${view.rows.length} registros consultados. Último: ${period(last)}${fields.length?`; ${fields.map(({name,value})=>`${name}: ${format(value)}`).join('; ')}`:''}.`);
+    return result;
+  }
+  for(const name of view.series){
+    const index=view.headers.indexOf(name);
+    if(index<0)continue;
+    const valid=view.rows.filter(row=>row[index]!==null && row[index]!==undefined && row[index]!=='');
+    if(!valid.length)continue;
+    const last=valid.at(-1);
+    if(view.status){
+      result.push(`${name}: información en ${valid.length} de ${view.rows.length} registros; último dato en ${period(last)} (${formatCell(last[index],name,view)}).`);
+      continue;
+    }
+    const flow=/^(?:202\d|PREMIOS PAGADOS|PREMIOS MAYORES|VALOR PREMIOS|DEMORADOS|PQR$|CAPACITACIONES$|INDUCCIONES$|REALIZADAS POR LA COORDINACIÓN|COMPRA$|CONSUMO |VERIFICACIONES$|# VISITAS$)/i.test(name);
+    const values=valid.map(row=>numeric(row[index])).filter(value=>value!==null);
+    const total=flow && values.length?`Total del período: ${format(values.reduce((sum,value)=>sum+value,0))}. `:'';
+    result.push(`${name}: ${total}Último valor ${formatCell(last[index],name,view)} en ${period(last)}.`);
+  }
+  if(!result.length)result.push(`${view.rows.length} registros disponibles, sin cifras numéricas en las columnas de la gráfica.`);
+  return result;
+}
 function compactReport(doc,entries) {
   const bottom=doc.internal.pageSize.getHeight()-42,width=doc.internal.pageSize.getWidth()-76;
   let y=0,pages=0;
@@ -214,55 +264,59 @@ function compactReport(doc,entries) {
     doc.setFont('helvetica',bold||variant==='board'||variant==='section'||variant==='metric'?'bold':'normal');doc.setFontSize(size);
     doc.text(text,38+indent+(box?14:0),y+(box?size+1:0));y+=height+3;
   };
+  let omitted=0,yearless=0,issues=0,reported=0;
   for(const {board,response,filters} of entries){
     for(const region of (filters.region==='both'?['boy','amz']:[filters.region])){
       if(filters.zone!=='ALL' && !UADS[region].includes(filters.zone))continue;
-      const book=response.data?.[region];if(!book)continue;
-      line(`${board.id}. ${board.title} · ${REGIONS[region]}`,{variant:'board',size:12,space:7});
-      line(`Años: ${filters.years?.length?filters.years.join(', '):'Todos'} · Meses: ${filters.months?.length===12?'Todos':filters.months?.join(', ')||'Todos'} · UAD: ${filters.zone==='ALL'?'Todas':filters.zone}`,{variant:'filter',size:8,space:7});
+      const book=response.data?.[region];if(!book){issues++;continue;}
+      const sections=[];
       if(board.kind==='overview'){
         const indicators=salesIndicators(book,region,filters);
-        if(!indicators.length)line('Ventas: sin datos atribuibles a los años elegidos.',{variant:'empty',indent:12});
-        indicators.forEach(({year,total,compliance})=>line(`Ventas ${year}: ${total} · Cumplimiento ${year}: ${compliance}`,{variant:'metric',indent:12,size:10}));
+        const salesSheet=region==='boy'?'Ventas AP':'Ventas';
+        const sales=book[salesSheet];
+        const salesView=sales?getView(sales,{sheet:salesSheet,columns:['MES','2025','2026'],label:'MES',series:['2025','2026']},region,filters.zone,filters.years):null;
+        indicators.forEach(({year,total,compliance})=>{
+          const index=salesView?.headers.indexOf(year)??-1;
+          if(index<0 || !salesView.rows.some(row=>numeric(row[index])!==null))return;
+          sections.push({title:`Ventas ${year}`,facts:[`Total del período: ${total}. ${compliance==='Sin comparativo'?'No hay un año anterior comparable.':`Cumplimiento frente al año anterior: ${compliance}.`}`]});
+        });
         const chance=book['Ventas Chance'];
         if(chance){
           const cv=getView(chance,{sheet:'Ventas Chance',columns:['MES','2025','2026'],label:'MES',series:['2025','2026']},region,filters.zone,filters.years);
-          cv?.series?.forEach(year=>{
-            const index=cv.headers.indexOf(year),total=cv.rows.reduce((sum,row)=>sum+(numeric(row[index])||0),0);
-            line(`Ventas Chance ${year}: ${format(total)}`,{variant:'metric',indent:12,size:10});
-          });
+          if(cv?.rows.length && !cv.yearUnavailable)sections.push({title:'Ventas Chance',facts:sectionSummary(cv)});
         }
         const rights=book['Derechos de explotación'];
         if(rights){
           const rv=getView(rights,{sheet:'Derechos de explotación',columns:['MES','EFECTIVIDAD'],label:'MES',series:['EFECTIVIDAD']},region,filters.zone,filters.years);
-          const last=rv?.rows?.at(-1);
-          line(last?`Derechos de explotación: ${format(last[1])} (${format(last[0])}).`:'Derechos de explotación: sin registros para los filtros.',{variant:last?'metric':'empty',indent:12,size:10});
+          if(rv?.rows.length && !rv.yearUnavailable)sections.push({title:'Derechos de explotación',facts:sectionSummary(rv)});
         }
-        continue;
-      }
-      for(const section of board.sections){
+        if(!sections.length)omitted++;
+      } else for(const section of board.sections){
         const spec=section[region];if(!spec)continue;
         const title=region==='amz'&&section.amzTitle?section.amzTitle:section.title;
         const view=getView(book[spec.sheet],spec,region,filters.zone,filters.years);
-        if(!view){line(`${title}: fuente no disponible.`,{variant:'empty',indent:12});continue;}
-        if(view.error){line(`${title}: ${view.error}`,{variant:'empty',indent:12});continue;}
-        if(!view.rows.length){line(`${title}: sin registros para los filtros elegidos.`,{variant:'empty',indent:12});continue;}
-        const metric=sectionMetric(view);
-        line(`${title} · ${view.rows.length} registros${metric?` · ${metric.title}: ${metric.value}`:''}`,{variant:'section',size:9,indent:12});
-        if(view.noChart)continue;
-        let latest=view.rows.at(-1);
-        if(view.categoryColumn){
-          const month=view.headers.indexOf(view.label),lastMonth=latest[month];
-          const latestRows=view.rows.filter(row=>row[month]===lastMonth);
-          line(`Último mes disponible: ${format(lastMonth)}. ${latestRows.length} modalidades:`,{indent:22});
-          latestRows.forEach(row=>line(`${format(row[view.headers.indexOf(view.categoryColumn)])}: ${view.series.map(name=>`${name} ${formatCell(row[view.headers.indexOf(name)],name,view)}`).join(' · ')}`,{indent:30,size:8}));
-        }else{
-          const total=view.totalColumn?` · Total ${format(latest[view.headers.indexOf(view.totalColumn)])}`:'';
-          line(`Último registro: ${format(latest[view.headers.indexOf(view.label)])}${total} · ${view.series.map(name=>`${name}: ${formatCell(latest[view.headers.indexOf(name)],name,view)}`).join(' · ')}`,{indent:22,size:8});
-        }
+        if(!view || view.error){issues++;continue;}
+        if(view.yearUnavailable){yearless++;continue;}
+        if(!view.rows.length){omitted++;continue;}
+        sections.push({title,facts:sectionSummary(view)});
       }
+      if(!sections.length)continue;
+      line(`${board.id}. ${board.title} · ${REGIONS[region]}`,{variant:'board',size:12,space:7});
+      line(`Años: ${filters.years?.length?filters.years.join(', '):'Todos'} · Meses: ${filters.months?.length===12?'Todos':filters.months?.join(', ')||'Todos'} · UAD: ${filters.zone==='ALL'?'Todas':filters.zone}`,{variant:'filter',size:8,space:7});
+      sections.forEach(({title,facts})=>{
+        reported++;
+        line(title,{variant:'section',size:9,indent:12});
+        facts.forEach(fact=>line(fact,{indent:22,size:8}));
+      });
       y+=7;
     }
+  }
+  if(!reported)line('No hay cifras verificables para los filtros elegidos. Prueba otro año o período.',{variant:'metric',size:10});
+  if(omitted || yearless || issues){
+    line('Alcance de los datos',{variant:'board',size:11});
+    if(omitted)line(`${omitted} secciones sin registros en los filtros elegidos; se omitieron para mantener breve el informe.`,{size:8,indent:12});
+    if(yearless)line(`${yearless} secciones no identifican el año en el origen y no se atribuyeron al año seleccionado.`,{size:8,indent:12});
+    if(issues)line(`${issues} secciones no pudieron leerse o no tienen fuente disponible; revisa el origen de datos.`,{size:8,indent:12});
   }
   return pages;
 }
