@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { BOARDS, MONTHS, REGIONS, UADS, OBLIGATIONS } from './catalog.js';
-import { availableYearsFromResponse, chartData, filtersFor, format, getView, isConfigured, normalize, numeric, requestAppsScript } from './data.js';
+import { chartData, filtersFor, format, getView, isConfigured, normalize, numeric, requestAppsScript } from './data.js';
 import { renderChart, renderTable } from './charts.js';
 import { createReport } from './pdf.js';
 import { salesIndicators, sectionMetric } from './metrics.js';
@@ -8,14 +8,17 @@ import { initAuth, currentUser, token, login, register, resetPassword, logout } 
 
 const $=id=>document.getElementById(id);
 const STORE='jer_dashboard_overrides_v1';
-const state={board:1,availableYears:[],global:{months:MONTHS.slice(),years:null,region:'both',zone:'ALL',obligation:'ALL'},overrides:{},response:null,epoch:0};
+const state={board:1,global:{months:MONTHS.slice(),years:[],region:'both',zone:'ALL',obligation:'ALL'},overrides:{},response:null,epoch:0};
 try {state.overrides=JSON.parse(localStorage.getItem(STORE) || '{}') || {};} catch (_) {}
+// Elimina selecciones antiguas de año guardadas antes de retirar ese filtro.
+for(const override of Object.values(state.overrides))if(override && typeof override==='object')delete override.years;
+try {localStorage.setItem(STORE,JSON.stringify(state.overrides));} catch (_) {}
 
 function message(text='',error=false) { $('status').textContent=text;$('status').classList.toggle('error',error); }
 function authMessage(text='',error=false) { $('auth-status').textContent=text;$('auth-status').classList.toggle('error',error); }
 function buttonDisabled(disabled) {for(const id of ['refresh','pdf-current','pdf-summary','pdf-all']) $(id).disabled=disabled;}
 function elt(tag,className,text) {const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=text;return n;}
-function effective(boardId=state.board) {return filtersFor(state.global,state.overrides[boardId]);}
+function effective(boardId=state.board) {return {...filtersFor(state.global,state.overrides[boardId]),years:[]};}
 function selectedRegions(filters) {
   const all=filters.region==='both'?['boy','amz']:[filters.region];
   return all.filter(r=>filters.zone==='ALL'||UADS[r].includes(filters.zone));
@@ -43,32 +46,6 @@ function renderMonths() {
     state.global.months=MONTHS.filter(x=>set.has(x));$('period').value='CUSTOM';renderMonths();
   });
 }
-function yearButtons(root,selected,onClick,showAll=false) {
-  root.replaceChildren();
-  if(showAll){
-    const all=elt('button',`month-chip ${selected.length?'':'active'}`,'Todos');
-    all.type='button';all.setAttribute('aria-pressed',!selected.length);
-    all.addEventListener('click',()=>onClick(null));root.append(all);
-  }
-  state.availableYears.forEach(year=>{
-    const active=selected.includes(year);
-    const b=elt('button',`month-chip ${active?'active':''}`,String(year));
-    b.type='button';b.setAttribute('aria-pressed',active);
-    b.addEventListener('click',()=>onClick(year));root.append(b);
-  });
-}
-function renderYears() {
-  yearButtons($('year-chips'),state.global.years||[],year=>{
-    if(year===null)state.global.years=[];
-    else {
-      const set=new Set(state.global.years||[]);
-      if(set.has(year)&&set.size===1)return;
-      set.has(year)?set.delete(year):set.add(year);
-      state.global.years=[...set].sort((a,b)=>a-b);
-    }
-    renderYears();
-  },true);
-}
 function fillZone(select,region,includeInherit=false) {
   const previous=select.value;
   select.replaceChildren();
@@ -83,7 +60,6 @@ function setupSelects() {
     $('obligation').add(new Option(title,key));
   }
   fillZone($('zone'),'both');fillZone($('override-zone'),'both',true);renderMonths();
-  renderYears();
   $('period').addEventListener('change',()=>{state.global.months=preset($('period').value)||state.global.months;renderMonths();});
   $('region').addEventListener('change',()=>fillZone($('zone'),$('region').value));
   $('override-region').addEventListener('change',()=>fillZone($('override-zone'),$('override-region').value==='INHERIT'?$('region').value:$('override-region').value,true));
@@ -91,9 +67,8 @@ function setupSelects() {
     $('override-months').hidden=$('override-period').value!=='CUSTOM';
     renderOverrideMonths();
   });
-  $('override-year-mode').addEventListener('change',renderOverrideYears);
   $('global-filters').addEventListener('submit',e=>{
-    e.preventDefault();if(state.global.years===null)return message('Espera a que carguen los años disponibles.',true);
+    e.preventDefault();
     state.global.region=$('region').value;state.global.zone=$('zone').value;
     state.global.obligation=$('obligation').value;
     renderNav();loadBoard();
@@ -121,7 +96,6 @@ function renderNav() {
 }
 function selectOverride() {
   delete state.draftMonths;
-  delete state.draftYears;
   const o=state.overrides[state.board] || {};
   const board=BOARDS.find(b=>b.id===state.board);
   const select=$('override-obligation');
@@ -131,24 +105,9 @@ function selectOverride() {
   fillZone($('override-zone'),o.region??state.global.region,true);
   $('override-zone').value=o.zone??'INHERIT';
   $('override-obligation').value=o.obligation??'INHERIT';
-  $('override-year-mode').value=Object.hasOwn(o,'years')?(o.years.length?'CUSTOM':'ALL'):'INHERIT';
-  renderOverrideYears();
   $('override-period').value=o.months?'CUSTOM':'INHERIT';
   $('override-months').hidden=!o.months;
   renderOverrideMonths();$('override-dialog').showModal();
-}
-function renderOverrideYears() {
-  const custom=$('override-year-mode').value==='CUSTOM';
-  $('override-years').hidden=!custom;
-  if(!custom)return;
-  const selected=state.draftYears || (state.overrides[state.board]?.years?.length?state.overrides[state.board].years:null)
-    || (state.global.years?.length?state.global.years:null) || state.availableYears.slice(-1);
-  yearButtons($('override-years'),selected,year=>{
-    const set=new Set(state.draftYears || selected);
-    if(set.has(year)&&set.size===1)return;
-    set.has(year)?set.delete(year):set.add(year);
-    state.draftYears=[...set].sort((a,b)=>a-b);renderOverrideYears();
-  });
 }
 function renderOverrideMonths() {
   const selected=state.draftMonths || state.overrides[state.board]?.months || state.global.months;
@@ -164,16 +123,11 @@ function saveOverride() {
   const o={};
   const pr=get('override-period');
   if(pr!=='INHERIT')o.months=preset(pr)||(state.draftMonths || state.overrides[state.board]?.months || state.global.months);
-  const ym=get('override-year-mode');
-  if(ym==='ALL')o.years=[];
-  if(ym==='CUSTOM')o.years=state.draftYears || (state.overrides[state.board]?.years?.length?state.overrides[state.board].years:null)
-    || (state.global.years?.length?state.global.years:null) || state.availableYears.slice(-1);
   if(get('override-region')!=='INHERIT')o.region=get('override-region');
   if(get('override-zone')!=='INHERIT')o.zone=get('override-zone');
   if(get('override-obligation')!=='INHERIT')o.obligation=get('override-obligation');
   if(Object.keys(o).length)state.overrides[state.board]=o;else delete state.overrides[state.board];
   delete state.draftMonths;
-  delete state.draftYears;
   localStorage.setItem(STORE,JSON.stringify(state.overrides));
   $('override-dialog').close();renderNav();loadBoard();
 }
@@ -233,15 +187,15 @@ function overview(region,response,filters) {
     root.append(row);
   }
   const grid=elt('div','summary-grid');
-  grid.append(summaryCard('Ventas Chance',chance?renderChart(chance):'Sin hoja de origen',`Ventas de ${chance?.series?.join(' y ')||'los años elegidos'}.`));
-  grid.append(summaryCard(region==='amz'?'Ventas Amazonas':'Ventas apuestas permanentes',ap?renderChart(ap):'Sin hoja de origen',region==='amz'?'Ventas de Amazonas según los años seleccionados.':`Ventas de ${ap?.series?.join(' y ')||'los años elegidos'}.`));
+  grid.append(summaryCard('Ventas Chance',chance?renderChart(chance):'Sin hoja de origen',`Ventas de ${chance?.series?.join(' y ')||'los años disponibles'}.`));
+  grid.append(summaryCard(region==='amz'?'Ventas Amazonas':'Ventas apuestas permanentes',ap?renderChart(ap):'Sin hoja de origen',region==='amz'?'Ventas de Amazonas según las columnas anuales disponibles.':`Ventas de ${ap?.series?.join(' y ')||'los años disponibles'}.`));
   const comparison=chance?.series?.filter(x=>/^\d{4}$/.test(x)).sort((a,b)=>Number(a)-Number(b))||[];
   const prior=comparison.at(-2),latest=comparison.at(-1);
   const priorIdx=chance?.headers.indexOf(prior),latestIdx=chance?.headers.indexOf(latest);
   const valid=prior&&latest?chance.rows.map(r=>[numeric(r[priorIdx]),numeric(r[latestIdx])]).filter(([a,b])=>a!==null&&b!==null&&a!==0):[];
   const base=valid.reduce((t,r)=>t+r[0],0),actual=valid.reduce((t,r)=>t+r[1],0);
   const ratio=base?`${new Intl.NumberFormat('es-CO',{maximumFractionDigits:1}).format(actual/base*100)} %`:'Sin comparativo';
-  grid.append(summaryCard('Cumplimiento Chance del período',ratio,prior&&latest?`Ventas ${latest} ÷ ventas ${prior} de los meses elegidos.`:'Elige al menos dos años con ventas para calcular la comparación.'));
+  grid.append(summaryCard('Cumplimiento Chance del período',ratio,prior&&latest?`Ventas ${latest} ÷ ventas ${prior} de los meses elegidos.`:'Se necesitan dos columnas anuales con ventas para calcular la comparación.'));
   const rightsRows=rights?.rows.filter(r=>r[1]!==null && r[1]!==undefined)||[];
   const last=rights?.yearUnavailable?null:rightsRows.at(-1);
   grid.append(summaryCard('Efectividad derechos de explotación',last?format(last[1]):'Sin dato',rights?.yearUnavailable?'La fuente no identifica el año seleccionado.':last?`Último mes con registro: ${last[0]}. Valor literal del Excel.`:'No hay valor para los meses elegidos.'));
@@ -269,33 +223,6 @@ function renderBoard(board,response,filters) {
 }
 async function fetchBoard(boardId,filters) {
   return requestAppsScript(CONFIG.appsScriptUrl,{action:'board',board:boardId,filters,idToken:await token()});
-}
-async function initializeYears() {
-  const epoch=state.epoch;
-  message('Buscando los años disponibles…');buttonDisabled(true);
-  try {
-    let result;
-    try{result=await requestAppsScript(CONFIG.appsScriptUrl,{action:'years',idToken:await token()});}
-    catch(_){result={years:[]};}
-    if(epoch!==state.epoch || !currentUser())return;
-    let years=(result.years||[]).map(Number).filter(y=>Number.isInteger(y)&&y>=1900&&y<=2099);
-    // Algunos despliegues del servicio devuelven la lista vacía aunque las
-    // columnas de ventas sí contienen años. Leemos sus encabezados directamente.
-    if(!years.length){
-      const sales=await fetchBoard(2,{...state.global,months:MONTHS.slice(),years:[],region:'both',zone:'ALL'});
-      if(epoch!==state.epoch || !currentUser())return;
-      years=availableYearsFromResponse(sales);
-    }
-    state.availableYears=[...new Set(years)].sort((a,b)=>a-b);
-    if(!state.availableYears.length)throw new Error('No se encontraron años en las hojas de ventas. Revisa que el servicio de Apps Script esté actualizado.');
-    if(state.global.years===null)state.global.years=state.availableYears.length?state.availableYears.slice(-1):[];
-    else if(state.global.years.length){
-      state.global.years=state.global.years.filter(y=>state.availableYears.includes(y));
-      if(!state.global.years.length && state.availableYears.length)state.global.years=state.availableYears.slice(-1);
-    }
-    renderYears();await loadBoard();
-  }catch(error){if(epoch===state.epoch)message(error.message,true);}
-  finally{if(epoch===state.epoch)buttonDisabled(false);}
 }
 async function loadBoard() {
   const board=BOARDS.find(b=>b.id===state.board),filters=effective();
@@ -347,15 +274,15 @@ function bindAuthForms() {
 }
 async function start() {
   setupSelects();bindAuthForms();
-  $('refresh').addEventListener('click',initializeYears);
+  $('refresh').addEventListener('click',loadBoard);
   $('pdf-current').addEventListener('click',()=>exportReport(false));
   $('pdf-summary').addEventListener('click',()=>exportReport(true,'summary'));
   $('pdf-all').addEventListener('click',()=>exportReport(true));
   $('individual-settings').addEventListener('click',selectOverride);
-  $('close-dialog').addEventListener('click',()=>{$('override-dialog').close();delete state.draftMonths;delete state.draftYears;});
+  $('close-dialog').addEventListener('click',()=>{$('override-dialog').close();delete state.draftMonths;});
   $('override-form').addEventListener('submit',e=>{e.preventDefault();saveOverride();});
   $('clear-override').addEventListener('click',()=>{
-    delete state.overrides[state.board];delete state.draftMonths;delete state.draftYears;localStorage.setItem(STORE,JSON.stringify(state.overrides));
+    delete state.overrides[state.board];delete state.draftMonths;localStorage.setItem(STORE,JSON.stringify(state.overrides));
     $('override-dialog').close();renderNav();loadBoard();
   });
   if(!isConfigured(CONFIG)){$('setup').hidden=false;return;}
@@ -363,7 +290,7 @@ async function start() {
     await initAuth((user,info)=>{
       state.epoch++;state.response=null;$('dashboard').replaceChildren();
       $('login-screen').hidden=!!user;$('workspace').hidden=!user;$('top-actions').hidden=!user;
-      if(user){$('signed-user').textContent=user.email;renderNav();initializeYears();}
+      if(user){$('signed-user').textContent=user.email;renderNav();loadBoard();}
       else if(info)authMessage(info,true);
     });
   } catch(error){$('login-screen').hidden=false;authMessage(error.message,true);}
