@@ -187,42 +187,56 @@ function compactReport(doc,entries) {
   const bottom=doc.internal.pageSize.getHeight()-42,width=doc.internal.pageSize.getWidth()-76;
   let y=0,pages=0;
   const newPage=()=>{
-    doc.addPage();pages++;y=38;
-    color(doc,'#111b35');doc.rect(0,0,doc.internal.pageSize.getWidth(),14,'F');
-    doc.setFont('helvetica','bold');doc.setFontSize(15);color(doc,'#26334a','text');
-    doc.text('JER · Informe resumido',38,y);y+=24;
+    doc.addPage();pages++;y=113;
+    const pageWidth=doc.internal.pageSize.getWidth();
+    color(doc,'#111b35');doc.rect(0,0,pageWidth,89,'F');
+    color(doc,'#6259e8');doc.rect(0,89,pageWidth,5,'F');doc.rect(38,25,40,40,'F');
+    doc.setFont('helvetica','bold');doc.setFontSize(12);doc.setTextColor(255,255,255);
+    doc.text('JER',47,50);
+    doc.setFontSize(17);doc.text('Informe de gestión · Resumen',91,43);
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.text('Indicadores y cifras principales de los filtros consultados',91,62);
+    doc.text(`${entries.length} tableros seleccionados`,pageWidth-38,61,{align:'right'});
   };
-  const line=(value,{bold=false,size=9,indent=0,space=4}={})=>{
+  const line=(value,{bold=false,size=9,indent=0,space=4,variant='detail'}={})=>{
     doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);
-    const text=doc.splitTextToSize(pdfText(value),width-indent);
-    const height=Math.max(1,text.length)*(size+3)+space;
+    const box=variant==='board'||variant==='filter'||variant==='metric'||variant==='section'||variant==='empty';
+    const padding=box?variant==='board'?11:8:0;
+    const text=doc.splitTextToSize(pdfText(value),width-indent-(box?26:0));
+    const height=Math.max(1,text.length)*(size+3)+space+padding;
     if(!pages || y+height>bottom)newPage();
-    color(doc,'#26334a','text');doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(size);
-    doc.text(text,38+indent,y);y+=height;
+    if(box){
+      const fill={board:'#eae9fc',filter:'#f3f5fa',metric:'#edf7fc',section:'#f3f2fc',empty:'#fff5e7'}[variant];
+      const accent={board:'#5348e5',filter:'#9ba8bb',metric:'#1590b8',section:'#a8a1ef',empty:'#e9a236'}[variant];
+      color(doc,fill);doc.rect(38+indent,y-4,width-indent,height-3,'F');
+      color(doc,accent);doc.rect(38+indent,y-4,4,height-3,'F');
+    }
+    color(doc,variant==='empty'?'#875827':variant==='filter'?'#64718a':'#26334a','text');
+    doc.setFont('helvetica',bold||variant==='board'||variant==='section'||variant==='metric'?'bold':'normal');doc.setFontSize(size);
+    doc.text(text,38+indent+(box?14:0),y+(box?size+1:0));y+=height+3;
   };
   for(const {board,response,filters} of entries){
     for(const region of (filters.region==='both'?['boy','amz']:[filters.region])){
       if(filters.zone!=='ALL' && !UADS[region].includes(filters.zone))continue;
       const book=response.data?.[region];if(!book)continue;
-      line(`${board.id}. ${board.title} · ${REGIONS[region]}`,{bold:true,size:13,space:7});
-      line(`Años: ${filters.years?.length?filters.years.join(', '):'Todos'} · Meses: ${filters.months?.length===12?'Todos':filters.months?.join(', ')||'Todos'} · UAD: ${filters.zone==='ALL'?'Todas':filters.zone}`,{size:8,space:8});
+      line(`${board.id}. ${board.title} · ${REGIONS[region]}`,{variant:'board',size:12,space:7});
+      line(`Años: ${filters.years?.length?filters.years.join(', '):'Todos'} · Meses: ${filters.months?.length===12?'Todos':filters.months?.join(', ')||'Todos'} · UAD: ${filters.zone==='ALL'?'Todas':filters.zone}`,{variant:'filter',size:8,space:7});
       if(board.kind==='overview'){
         const indicators=salesIndicators(book,region,filters);
-        if(!indicators.length)line('Ventas: sin datos atribuibles a los años elegidos.',{indent:12});
-        indicators.forEach(({year,total,compliance})=>line(`Ventas ${year}: ${total} · Cumplimiento ${year}: ${compliance}`,{indent:12}));
+        if(!indicators.length)line('Ventas: sin datos atribuibles a los años elegidos.',{variant:'empty',indent:12});
+        indicators.forEach(({year,total,compliance})=>line(`Ventas ${year}: ${total} · Cumplimiento ${year}: ${compliance}`,{variant:'metric',indent:12,size:10}));
         const chance=book['Ventas Chance'];
         if(chance){
           const cv=getView(chance,{sheet:'Ventas Chance',columns:['MES','2025','2026'],label:'MES',series:['2025','2026']},region,filters.zone,filters.years);
           cv?.series?.forEach(year=>{
             const index=cv.headers.indexOf(year),total=cv.rows.reduce((sum,row)=>sum+(numeric(row[index])||0),0);
-            line(`Ventas Chance ${year}: ${format(total)}`,{indent:12});
+            line(`Ventas Chance ${year}: ${format(total)}`,{variant:'metric',indent:12,size:10});
           });
         }
         const rights=book['Derechos de explotación'];
         if(rights){
           const rv=getView(rights,{sheet:'Derechos de explotación',columns:['MES','EFECTIVIDAD'],label:'MES',series:['EFECTIVIDAD']},region,filters.zone,filters.years);
           const last=rv?.rows?.at(-1);
-          line(last?`Derechos de explotación: ${format(last[1])} (${format(last[0])}).`:'Derechos de explotación: sin registros para los filtros.',{indent:12});
+          line(last?`Derechos de explotación: ${format(last[1])} (${format(last[0])}).`:'Derechos de explotación: sin registros para los filtros.',{variant:last?'metric':'empty',indent:12,size:10});
         }
         continue;
       }
@@ -230,11 +244,11 @@ function compactReport(doc,entries) {
         const spec=section[region];if(!spec)continue;
         const title=region==='amz'&&section.amzTitle?section.amzTitle:section.title;
         const view=getView(book[spec.sheet],spec,region,filters.zone,filters.years);
-        if(!view){line(`${title}: fuente no disponible.`,{indent:12});continue;}
-        if(view.error){line(`${title}: ${view.error}`,{indent:12});continue;}
-        if(!view.rows.length){line(`${title}: sin registros para los filtros elegidos.`,{indent:12});continue;}
+        if(!view){line(`${title}: fuente no disponible.`,{variant:'empty',indent:12});continue;}
+        if(view.error){line(`${title}: ${view.error}`,{variant:'empty',indent:12});continue;}
+        if(!view.rows.length){line(`${title}: sin registros para los filtros elegidos.`,{variant:'empty',indent:12});continue;}
         const metric=sectionMetric(view);
-        line(`${title} · ${view.rows.length} registros${metric?` · ${metric.title}: ${metric.value}`:''}`,{bold:true,size:9,indent:12});
+        line(`${title} · ${view.rows.length} registros${metric?` · ${metric.title}: ${metric.value}`:''}`,{variant:'section',size:9,indent:12});
         if(view.noChart)continue;
         let latest=view.rows.at(-1);
         if(view.categoryColumn){

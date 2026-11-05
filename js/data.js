@@ -49,6 +49,13 @@ export function filtersFor(globalFilters, override = {}) {
     obligation: override.obligation ?? globalFilters.obligation
   };
 }
+export function availableYearsFromResponse(response) {
+  const years=new Set();
+  for(const book of Object.values(response?.data||{}))for(const dataset of Object.values(book||{})){
+    for(const header of dataset?.headers||[])if(/^(19|20)\d{2}$/.test(String(header).trim()))years.add(Number(header));
+  }
+  return [...years].sort((a,b)=>a-b);
+}
 export function getView(dataset, spec, region, zone='ALL', years=[]) {
   if (!spec || !dataset) return null;
   const isYear=h=>/^(19|20)\d{2}$/.test(String(h).trim());

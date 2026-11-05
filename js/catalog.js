@@ -54,7 +54,7 @@ export const BOARDS = [
   {id:14,title:'Controles SARLAFT',obligation:'sarlaft',sections:[p('sarlaft','Verificaciones SARLAFT',s('SARLAFT',['MES VERIFICADO','AUSENCIA OPERACIONES GIROS','AUSENCIA OPERACIONES CHANCE','PREMIOS MAYORES'],'MES VERIFICADO',['AUSENCIA OPERACIONES GIROS','AUSENCIA OPERACIONES CHANCE','PREMIOS MAYORES'],{status:true}),null)]},
   {id:15,title:'Oficios y requerimientos',obligation:'sarlaft',sections:[
     p('oficios','Oficios al concedente',s('OFICIOS CONCEDENTES',['INFORME','FECHA PRESENTACIÓN','ENCARGADO','OBSERVACIÓN'],'FECHA PRESENTACIÓN',['INFORME'],{status:true}),null),
-    p('requerimientos','Requerimientos',s('REQUERIMIENTOS',['RADICADO','INFORME','FECHA PRESENTACIÓN','ENCARGADO','OBSERVACIÓN'],'FECHA PRESENTACIÓN',[],{metric:'requerimientos',noChart:true}),null)
+    p('requerimientos','Requerimientos',s('REQUERIMIENTOS',['RADICADO','FECHA PRESENTACIÓN'],'FECHA PRESENTACIÓN',[],{metric:'requerimientos',noChart:true,allColumns:true}),null)
   ]},
   {id:16,title:'Personal y condiciones',obligation:'cobertura',sections:[
     p('discapacidad','Discapacidad',null,s('Discapacidad',['AÑO','CERTIFICADO FECHA','VENCE','TRABAJADORES','DIS NORMA','DISCA TOTAL'],'CERTIFICADO FECHA',['DIS NORMA','DISCA TOTAL'])),

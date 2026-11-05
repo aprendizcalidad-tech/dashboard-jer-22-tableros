@@ -1,6 +1,6 @@
 import { CONFIG } from './config.js';
 import { BOARDS, MONTHS, REGIONS, UADS, OBLIGATIONS } from './catalog.js';
-import { chartData, filtersFor, format, getView, isConfigured, normalize, numeric, requestAppsScript } from './data.js';
+import { availableYearsFromResponse, chartData, filtersFor, format, getView, isConfigured, normalize, numeric, requestAppsScript } from './data.js';
 import { renderChart, renderTable } from './charts.js';
 import { createReport } from './pdf.js';
 import { salesIndicators, sectionMetric } from './metrics.js';
@@ -274,9 +274,20 @@ async function initializeYears() {
   const epoch=state.epoch;
   message('Buscando los años disponibles…');buttonDisabled(true);
   try {
-    const result=await requestAppsScript(CONFIG.appsScriptUrl,{action:'years',idToken:await token()});
+    let result;
+    try{result=await requestAppsScript(CONFIG.appsScriptUrl,{action:'years',idToken:await token()});}
+    catch(_){result={years:[]};}
     if(epoch!==state.epoch || !currentUser())return;
-    state.availableYears=result.years.filter(y=>Number.isInteger(y)).sort((a,b)=>a-b);
+    let years=(result.years||[]).map(Number).filter(y=>Number.isInteger(y)&&y>=1900&&y<=2099);
+    // Algunos despliegues del servicio devuelven la lista vacía aunque las
+    // columnas de ventas sí contienen años. Leemos sus encabezados directamente.
+    if(!years.length){
+      const sales=await fetchBoard(2,{...state.global,months:MONTHS.slice(),years:[],region:'both',zone:'ALL'});
+      if(epoch!==state.epoch || !currentUser())return;
+      years=availableYearsFromResponse(sales);
+    }
+    state.availableYears=[...new Set(years)].sort((a,b)=>a-b);
+    if(!state.availableYears.length)throw new Error('No se encontraron años en las hojas de ventas. Revisa que el servicio de Apps Script esté actualizado.');
     if(state.global.years===null)state.global.years=state.availableYears.length?state.availableYears.slice(-1):[];
     else if(state.global.years.length){
       state.global.years=state.global.years.filter(y=>state.availableYears.includes(y));
