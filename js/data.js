@@ -58,6 +58,11 @@ export function availableYearsFromResponse(response) {
 }
 export function getView(dataset, spec, region, zone='ALL', years=[]) {
   if (!spec || !dataset) return null;
+  if(spec.originalMatrix && dataset.matrix){
+    return {headers:dataset.matrix.cells[0].map(cell=>cell.value),rows:dataset.matrix.cells.slice(1).map(row=>row.map(cell=>cell.value)),
+      matrix:dataset.matrix,series:[],label:'MES',noChart:true,originalMatrix:true,
+      sheet:spec.sheet,region,monthUnfiltered:true,regionalTotal:false};
+  }
   const isYear=h=>/^(19|20)\d{2}$/.test(String(h).trim());
   const annual=dataset.headers.filter(h=>isYear(h) && (!years.length || years.includes(Number(h)))).sort((a,b)=>Number(a)-Number(b));
   const annualSpec=spec.columns.some(isYear);

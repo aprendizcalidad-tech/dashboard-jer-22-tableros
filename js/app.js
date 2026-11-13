@@ -3,8 +3,9 @@ import { BOARDS, MONTHS, REGIONS, UADS, OBLIGATIONS } from './catalog.js';
 import { chartData, filtersFor, format, getView, isConfigured, normalize, numeric, requestAppsScript } from './data.js';
 import { renderChart, renderTable } from './charts.js';
 import { createReport } from './pdf.js';
-import { salesIndicators, sectionMetric } from './metrics.js';
+import { salesComparison, salesIndicators, sectionMetric } from './metrics.js';
 import { initAuth, currentUser, token, login, register, resetPassword, logout } from './auth.js';
+import { bindNotes, loadNotes, reportNotes, resetNotes, showNotes } from './notes.js';
 
 const $=id=>document.getElementById(id);
 const STORE='jer_dashboard_overrides_v1';
@@ -92,7 +93,11 @@ function renderNav() {
   const board=BOARDS.find(b=>b.id===state.board);
   $('board-index').textContent=`TABLERO ${String(board.id).padStart(2,'0')} / 22`;
   $('board-title').textContent=board.title;
-  $('board-subtitle').textContent=state.overrides[board.id]?'Configuración individual activa para esta pestaña.':'Aplicando filtros globales.';
+  const isCNJSA=board.id===19;
+  $('period').closest('label').hidden=isCNJSA;
+  $('month-picks').hidden=isCNJSA;
+  $('override-period').closest('label').hidden=isCNJSA;
+  $('board-subtitle').textContent=isCNJSA?'Tabla completa del Excel; el selector de meses no aplica.':state.overrides[board.id]?'Configuración individual activa para esta pestaña.':'Aplicando filtros globales.';
 }
 function selectOverride() {
   delete state.draftMonths;
@@ -106,7 +111,7 @@ function selectOverride() {
   $('override-zone').value=o.zone??'INHERIT';
   $('override-obligation').value=o.obligation??'INHERIT';
   $('override-period').value=o.months?'CUSTOM':'INHERIT';
-  $('override-months').hidden=!o.months;
+  $('override-months').hidden=board.id===19||!o.months;
   renderOverrideMonths();$('override-dialog').showModal();
 }
 function renderOverrideMonths() {
@@ -138,22 +143,24 @@ function sectionView(board,section,region,response,filters) {
   const spec=section[region];
   return spec ? getView(response.data?.[region]?.[spec.sheet],spec,region,filters.zone,filters.years) : null;
 }
-function renderSection(section,view,region,filters) {
+function renderSection(section,view,region,filters,boardId) {
   const card=elt('article','topic');
+  card.dataset.noteAnchor=section.id;card.dataset.board=boardId;card.dataset.region=region;
   const header=elt('header');header.append(elt('h4','',region==='amz'&&section.amzTitle?section.amzTitle:section.title),elt('small','',`${REGIONS[region]} · ${view.sheet}`));card.append(header);
   if(view.error){card.append(elt('p','message error',view.error));return card;}
   const pair=elt('div',view.noChart?'pair table-only':'pair');
   const tablePanel=elt('div'),chartPanel=elt('div');
+  tablePanel.dataset.noteArea='table';
   tablePanel.append(elt('h5','','Tabla'),renderTable(view));
   pair.append(tablePanel);
-  if(!view.noChart){chartPanel.append(elt('h5','','Gráfica'),renderChart(view));pair.append(chartPanel);}
+  if(!view.noChart){chartPanel.dataset.noteArea='chart';chartPanel.append(elt('h5','','Gráfica'),renderChart(view));pair.append(chartPanel);}
   const metric=sectionMetric(view);
   if(metric)card.append(summaryCard(metric.title,metric.value,metric.note));
   card.append(pair);
   if(!view.rows.length)card.append(elt('p','data-note','La hoja existe, pero no contiene registros para estos filtros.'));
   if(view.regionalTotal)card.append(elt('p','data-note','Esta hoja no separa datos por UAD. Se muestra el total regional.'));
   if(view.yearUnavailable)card.append(elt('p','data-note','Esta fuente no identifica el año seleccionado. No se atribuyen sus datos a ese año.'));
-  if(view.monthUnfiltered && filters.months.length<12)card.append(elt('p','data-note','Esta hoja no tiene mes. El filtro de meses no modifica sus registros.'));
+  if(view.monthUnfiltered && filters.months.length<12 && !view.originalMatrix)card.append(elt('p','data-note','Esta hoja no tiene mes. El filtro de meses no modifica sus registros.'));
   if(section.note)card.append(elt('p','topic-note',section.note));
   if(section.provisional)card.append(elt('p','topic-note','Venta por modalidad está ubicada provisionalmente en la pestaña 22, según la última anotación del boceto.'));
   return card;
@@ -163,8 +170,22 @@ function summaryCard(title,body,note) {
   if(typeof body==='string')card.append(elt('strong','value',body));else if(body)card.append(body);
   if(note)card.append(elt('p','',note));return card;
 }
+function salesComparisonCard(comparison) {
+  const tile=elt('article','year-indicator comparison-indicator');
+  tile.append(elt('h4','','% comparación'));
+  if(comparison.previous>0){
+    tile.append(elt('strong','',comparison.change),
+      elt('span','',`${comparison.latest} frente a ${comparison.prior}`),
+      elt('small','',`Comparación de ${comparison.months} ${comparison.months===1?'mes':'meses'} con cifras en ambos años. ${comparison.latest} equivale al ${comparison.compliance} de ${comparison.prior}.`));
+  }else{
+    tile.append(elt('strong','','Sin comparativo'),elt('span','',`${comparison.latest} frente a ${comparison.prior}`),
+      elt('small','','No hay una base mayor que cero en meses con datos de ambos años.'));
+  }
+  return tile;
+}
 function overview(region,response,filters) {
   const root=elt('section','region-block');
+  root.dataset.noteAnchor='overview';root.dataset.board=1;root.dataset.region=region;
   const book=response.data?.[region];
   if(!book)return null;
   const chanceName='Ventas Chance',apName=region==='boy'?'Ventas AP':'Ventas';
@@ -178,17 +199,22 @@ function overview(region,response,filters) {
   const indicators=salesIndicators(book,region,filters);
   if(indicators.length){
     const row=elt('div','year-indicators');
-    indicators.forEach(({year,total,compliance,note})=>{
+    const shown=indicators.slice(-2);
+    shown.forEach(({year,total})=>{
       const tile=elt('article','year-indicator');
-      tile.append(elt('h4','',`Ventas ${year} · ${REGIONS[region]}`),elt('strong','',total),
-        elt('span','',`Cumplimiento ${year}: ${compliance}`),elt('small','',note));
+      tile.append(elt('h4','',`Ventas ${REGIONS[region]} ${year}`),elt('strong','',total),
+        elt('span','','Total del período'),elt('small','','Suma de los meses elegidos.'));
       row.append(tile);
     });
-    root.append(row);
+    const comparison=salesComparison(book,region,filters);
+    if(shown.length===2 && comparison)row.append(salesComparisonCard(comparison));
+    row.dataset.noteArea='indicators';root.append(row);
   }
   const grid=elt('div','summary-grid');
-  grid.append(summaryCard('Ventas Chance',chance?renderChart(chance):'Sin hoja de origen',`Ventas de ${chance?.series?.join(' y ')||'los años disponibles'}.`));
-  grid.append(summaryCard(region==='amz'?'Ventas Amazonas':'Ventas apuestas permanentes',ap?renderChart(ap):'Sin hoja de origen',region==='amz'?'Ventas de Amazonas según las columnas anuales disponibles.':`Ventas de ${ap?.series?.join(' y ')||'los años disponibles'}.`));
+  const chanceCard=summaryCard('Ventas Chance',chance?renderChart(chance):'Sin hoja de origen',`Ventas de ${chance?.series?.join(' y ')||'los años disponibles'}.`);
+  chanceCard.dataset.noteArea='chart';chanceCard.dataset.noteSubsection='chance';grid.append(chanceCard);
+  const apCard=summaryCard(region==='amz'?'Ventas Amazonas':'Ventas apuestas permanentes',ap?renderChart(ap):'Sin hoja de origen',region==='amz'?'Ventas de Amazonas según las columnas anuales disponibles.':`Ventas de ${ap?.series?.join(' y ')||'los años disponibles'}.`);
+  apCard.dataset.noteArea='chart';apCard.dataset.noteSubsection='sales';grid.append(apCard);
   const comparison=chance?.series?.filter(x=>/^\d{4}$/.test(x)).sort((a,b)=>Number(a)-Number(b))||[];
   const prior=comparison.at(-2),latest=comparison.at(-1);
   const priorIdx=chance?.headers.indexOf(prior),latestIdx=chance?.headers.indexOf(latest);
@@ -214,11 +240,12 @@ function renderBoard(board,response,filters) {
     const cards=board.sections.map(section=>({section,view:sectionView(board,section,region,response,filters)})).filter(x=>x.view);
     if(!cards.length)continue;
     const block=elt('section','region-block');block.append(setRegionTitle(region));
-    for(const {section,view} of cards)block.append(renderSection(section,view,region,filters));
+    for(const {section,view} of cards)block.append(renderSection(section,view,region,filters,board.id));
     container.append(block);shown++;
   }
   if(!shown)container.append(elt('div','empty-region','No hay hojas de esta región para el tablero o la UAD elegida.'));
   if(response.missing?.length)container.append(elt('p','data-note',`Hojas faltantes: ${response.missing.join(' · ')}`));
+  showNotes(board.id);
   $('connection').textContent=`Conectado · ${response.updatedAt || 'ahora'}`;
 }
 async function fetchBoard(boardId,filters) {
@@ -250,7 +277,7 @@ async function exportReport(all=false,mode='full') {
       const response=!all&&state.response?state.response:await fetchBoard(b.id,filters);
       results.push({board:b,response,filters});
     }
-    await createReport(results,{mode});
+    await createReport(results,{mode,notes:reportNotes()});
     message(`PDF ${mode==='summary'?'resumido':all?'completo':'de la pestaña'} generado.`);
   } catch(error) {message('No se pudo descargar el PDF: '+error.message,true);}
   finally {buttonDisabled(false);}
@@ -274,6 +301,7 @@ function bindAuthForms() {
 }
 async function start() {
   setupSelects();bindAuthForms();
+  bindNotes(()=>state.board);
   $('refresh').addEventListener('click',loadBoard);
   $('pdf-current').addEventListener('click',()=>exportReport(false));
   $('pdf-summary').addEventListener('click',()=>exportReport(true,'summary'));
@@ -290,8 +318,8 @@ async function start() {
     await initAuth((user,info)=>{
       state.epoch++;state.response=null;$('dashboard').replaceChildren();
       $('login-screen').hidden=!!user;$('workspace').hidden=!user;$('top-actions').hidden=!user;
-      if(user){$('signed-user').textContent=user.email;renderNav();loadBoard();}
-      else if(info)authMessage(info,true);
+      if(user){$('signed-user').textContent=user.email;renderNav();loadBoard();loadNotes(user,()=>state.board);}
+      else {resetNotes();if(info)authMessage(info,true);}
     });
   } catch(error){$('login-screen').hidden=false;authMessage(error.message,true);}
 }

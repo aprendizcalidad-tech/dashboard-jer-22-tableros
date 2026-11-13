@@ -12,3 +12,33 @@
 .year-indicator strong{font-size:24px;color:#4f46da;overflow-wrap:anywhere}
 .year-indicator span{font-weight:700;color:#34425a}
 .year-indicator small{color:#7d899b}
+.year-indicators{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch}
+.year-indicator{max-width:none;min-width:0}
+.comparison-indicator{background:linear-gradient(135deg,#f3f1ff,#edf8fc);border-color:#bcb6f5}
+.comparison-indicator strong{color:#3f36bb}
+@media(max-width:900px){.year-indicators{grid-template-columns:repeat(2,minmax(0,1fr))}.comparison-indicator{grid-column:1/-1}}
+@media(max-width:720px){.year-indicators{grid-template-columns:1fr}.comparison-indicator{grid-column:auto}}
+
+/* Cuadro CNJSA: reproduce el encabezado doble, uniones y colores del origen. */
+.cnjsa-scroll{max-height:none!important;overflow:auto;border:1px solid #c6cede}
+.cnjsa-table{width:max-content;min-width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px}
+.cnjsa-table td{min-width:0;max-width:none;white-space:normal;overflow-wrap:break-word;padding:10px 9px;border:1px solid #b9c2d1;vertical-align:middle}
+.cnjsa-table td:first-child{position:sticky;left:0;z-index:2;background:#fff}
+.cnjsa-table .cnjsa-head td{position:sticky;top:0;z-index:3;text-align:center;line-height:1.3;border:1px solid #8997b1;white-space:normal}
+.cnjsa-table .cnjsa-head:first-child td{top:0}
+.cnjsa-table .cnjsa-head:nth-child(2) td{top:39px}
+.cnjsa-table .cnjsa-head td:first-child{z-index:4}
+.cnjsa-table tr:nth-child(even) td{background-color:inherit}
+
+/* Notas flotantes por sección, con edición y arrastre mediante el encabezado. */
+.board-tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.board-tools .active{background:#e8e5ff;border-color:#867df1}
+.notes-status{font-size:12px;color:#5f6b88;margin:0 0 10px;min-height:18px}
+.notes-status.error{color:#aa394b}
+[data-note-anchor]{position:relative}
+.floating-note{position:absolute;z-index:20;width:240px;min-height:146px;max-width:min(300px,90vw);background:#fff7d7;border:1px solid #e9c676;border-radius:12px;box-shadow:0 11px 28px #27304b42;overflow:hidden;transform:none}
+.floating-note-head{display:flex;align-items:center;justify-content:space-between;padding:8px 11px;background:#f9e7a9;color:#483b24;cursor:grab;touch-action:none;user-select:none}
+.floating-note-head:active{cursor:grabbing}
+.floating-note-close{border:0;background:transparent;color:#55432d;font-size:20px;line-height:1;cursor:pointer}
+.floating-note textarea{display:block;width:100%;min-height:102px;resize:vertical;border:0;outline:0;background:transparent;padding:10px 12px;color:#3d3a34;font-family:inherit;font-size:13px;line-height:1.45}
+@media(max-width:720px){.board-tools{width:100%}.board-tools .button{white-space:normal}.floating-note{width:210px}}

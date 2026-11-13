@@ -41,3 +41,19 @@ export function salesIndicators(book,region,filters) {
       note:previous?`Cumplimiento frente a ${previous} en meses con datos de ambos años.`:'Sin año anterior seleccionado para comparar.'};
   });
 }
+
+export function salesComparison(book,region,filters) {
+  const sheet=region==='boy'?'Ventas AP':'Ventas';
+  const source=book?.[sheet];if(!source)return null;
+  const view=getView(source,{sheet,columns:['MES','2025','2026'],label:'MES',series:['2025','2026']},region,filters.zone,filters.years);
+  if(!view)return null;
+  const years=view.series.filter(year=>/^\d{4}$/.test(year)).sort((a,b)=>Number(a)-Number(b));
+  if(years.length<2)return null;
+  const prior=years.at(-2),latest=years.at(-1);
+  const a=view.headers.indexOf(prior),b=view.headers.indexOf(latest);
+  const pairs=view.rows.map(row=>[numeric(row[a]),numeric(row[b])]).filter(([x,y])=>x!==null&&y!==null);
+  const previous=pairs.reduce((total,[x])=>total+x,0),current=pairs.reduce((total,[,y])=>total+y,0);
+  return {prior,latest,months:pairs.length,previous,current,
+    compliance:previous>0?`${format(current/previous*100)} %`:'Sin comparativo',
+    change:previous>0?`${current>previous?'+':''}${format((current-previous)/previous*100)} %`:'Sin comparativo'};
+}

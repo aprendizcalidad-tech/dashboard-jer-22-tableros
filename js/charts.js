@@ -141,6 +141,7 @@ export function renderChart(view) {
 }
 
 export function renderTable(view) {
+  if(view.originalMatrix && view.matrix)return renderOriginalMatrix(view.matrix);
   const scroll=document.createElement('div');scroll.className='table-scroll';
   const table=document.createElement('table');
   const thead=table.createTHead(),tr=thead.insertRow();
@@ -148,6 +149,40 @@ export function renderTable(view) {
   const tbody=table.createTBody();
   view.rows.forEach(row=>{
     const tr=tbody.insertRow();row.forEach((value,i)=>{const td=tr.insertCell();td.textContent=formatCell(value,view.headers[i],view);td.title=td.textContent;});
+  });
+  scroll.append(table);return scroll;
+}
+function renderOriginalMatrix(matrix){
+  const scroll=document.createElement('div');scroll.className='table-scroll cnjsa-scroll';
+  const table=document.createElement('table');table.className='cnjsa-table';
+  if(matrix.columnWidths?.length){
+    const columns=document.createElement('colgroup');
+    const widths=matrix.columnWidths.map(width=>Math.max(80,Number(width)||100));
+    table.style.width=`${widths.reduce((a,b)=>a+b,0)}px`;
+    widths.forEach(width=>{const col=document.createElement('col');col.style.width=`${width}px`;columns.append(col);});
+    table.append(columns);
+  }
+  const covered=new Set(),merges=new Map();
+  for(const merge of matrix.merges||[]){
+    merges.set(`${merge.row}:${merge.col}`,merge);
+    for(let r=merge.row;r<merge.row+merge.rowSpan;r++)for(let c=merge.col;c<merge.col+merge.colSpan;c++){
+      if(r!==merge.row||c!==merge.col)covered.add(`${r}:${c}`);
+    }
+  }
+  matrix.cells.forEach((row,r)=>{
+    const tr=table.insertRow();
+    if(r<(matrix.headerRows||0))tr.className='cnjsa-head';
+    row.forEach((cell,c)=>{
+      if(covered.has(`${r}:${c}`))return;
+      const td=tr.insertCell();td.textContent=cell.value??'';
+      const merge=merges.get(`${r}:${c}`);
+      if(merge){td.rowSpan=merge.rowSpan;td.colSpan=merge.colSpan;}
+      if(/^#[0-9a-f]{6}$/i.test(cell.background||''))td.style.backgroundColor=cell.background;
+      if(/^#[0-9a-f]{6}$/i.test(cell.color||''))td.style.color=cell.color;
+      if(cell.bold)td.style.fontWeight='700';
+      if(Number(cell.fontSize)>0)td.style.fontSize=`${cell.fontSize}pt`;
+      if(['left','right','center'].includes(cell.align))td.style.textAlign=cell.align;
+    });
   });
   scroll.append(table);return scroll;
 }
